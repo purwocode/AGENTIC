@@ -36,6 +36,24 @@ except ImportError:
     MISPWarningListFilter = None
     WarningMatch = None
 
+# Dynamic Payload Engine for comprehensive payload generation
+try:
+    from attack_surface.dynamic_payloads import (
+        DynamicPayloadEngine,
+        PayloadContext,
+        PayloadMode,
+        create_engine as create_payload_engine,
+        WAFBypassEngine,
+        EncodingEngine,
+        ObfuscationEngine,
+    )
+    HAS_DYNAMIC_PAYLOADS = True
+except ImportError:
+    HAS_DYNAMIC_PAYLOADS = False
+    DynamicPayloadEngine = None
+    PayloadMode = None
+    create_payload_engine = None
+
 
 @dataclass
 class HttpResponse:
@@ -1369,14 +1387,41 @@ class WAFDetector:
 class ActiveScanner:
     """Active scanner for real target reconnaissance and vulnerability testing."""
     
-    def __init__(self, timeout: int = 10, verify_ssl: bool = False, verbose: bool = True):
+    # Payload mode constants for backward compatibility
+    MODE_QUICK = "quick"
+    MODE_STANDARD = "standard"
+    MODE_THOROUGH = "thorough"
+    MODE_AGGRESSIVE = "aggressive"
+    
+    def __init__(
+        self, 
+        timeout: int = 10, 
+        verify_ssl: bool = False, 
+        verbose: bool = True,
+        payload_mode: str = "standard"
+    ):
         self.timeout = timeout
         self.verify_ssl = verify_ssl
         self.verbose = verbose
+        self.payload_mode = payload_mode
         self._baselines: dict[str, BaselineResponse] = {}  # Cache baselines per endpoint
         self._protected_endpoints: list[str] = []  # Endpoints requiring auth
         self._filtered_false_positives: list[dict] = []  # Track what was filtered
         self._detected_waf: WAFDetectionResult | None = None  # Detected WAF for bypass payloads
+        
+        # Initialize Dynamic Payload Engine
+        self._payload_engine = None
+        if HAS_DYNAMIC_PAYLOADS:
+            mode_map = {
+                "quick": PayloadMode.QUICK,
+                "standard": PayloadMode.STANDARD,
+                "thorough": PayloadMode.THOROUGH,
+                "aggressive": PayloadMode.AGGRESSIVE,
+            }
+            self._payload_engine = DynamicPayloadEngine(PayloadContext(
+                mode=mode_map.get(payload_mode, PayloadMode.STANDARD)
+            ))
+            self._log(f"[Payload Engine] Dynamic Payload Engine: ENABLED (mode: {payload_mode})")
         
         # Initialize MISP Warning List Filter for false positive reduction
         if HAS_WARNING_FILTER:
@@ -1394,6 +1439,19 @@ class ActiveScanner:
         else:
             self.session = None
     
+    def set_payload_mode(self, mode: str):
+        """Change payload generation mode dynamically."""
+        self.payload_mode = mode
+        if self._payload_engine and HAS_DYNAMIC_PAYLOADS:
+            mode_map = {
+                "quick": PayloadMode.QUICK,
+                "standard": PayloadMode.STANDARD,
+                "thorough": PayloadMode.THOROUGH,
+                "aggressive": PayloadMode.AGGRESSIVE,
+            }
+            self._payload_engine.context.mode = mode_map.get(mode, PayloadMode.STANDARD)
+            self._log(f"[Payload Engine] Mode changed to: {mode}")
+    
     def _log(self, message: str):
         """Print verbose log."""
         if self.verbose:
@@ -1403,8 +1461,7 @@ class ActiveScanner:
         """
         Generate WAF bypass variations for a payload.
         
-        If a WAF is detected, generates WAF-specific bypass payloads.
-        Otherwise, returns basic encoding variations.
+        Uses Dynamic Payload Engine if available, otherwise falls back to basic encoding.
         
         Args:
             original_payload: The original attack payload
@@ -1415,16 +1472,30 @@ class ActiveScanner:
         """
         payloads = [original_payload]
         
-        if self._detected_waf and self._detected_waf.detected:
-            # Get WAF-specific bypasses
-            waf_bypasses = WAFBypasses.get_waf_specific_bypasses(
-                self._detected_waf.waf_type, 
-                original_payload
+        # Use Dynamic Payload Engine if available
+        if self._payload_engine and HAS_DYNAMIC_PAYLOADS:
+            waf_type = ""
+            if self._detected_waf and self._detected_waf.detected:
+                waf_type = self._detected_waf.waf_type
+                self._payload_engine.set_context(waf_type=waf_type)
+            
+            # Get WAF bypass payloads from dynamic engine
+            generated = WAFBypassEngine.get_bypass_payloads(
+                original_payload,
+                waf_type or "generic",
+                max_variants=self._get_payload_limit()
             )
-            payloads.extend(waf_bypasses)
-        
-        # Always add some generic bypasses
-        payloads.extend(PayloadEncoder.generate_bypass_variations(original_payload, attack_type))
+            payloads.extend([g.raw for g in generated])
+        else:
+            # Fallback to old method
+            if self._detected_waf and self._detected_waf.detected:
+                waf_bypasses = WAFBypasses.get_waf_specific_bypasses(
+                    self._detected_waf.waf_type, 
+                    original_payload
+                )
+                payloads.extend(waf_bypasses)
+            
+            payloads.extend(PayloadEncoder.generate_bypass_variations(original_payload, attack_type))
         
         # Remove duplicates while preserving order
         seen = set()
@@ -1434,7 +1505,59 @@ class ActiveScanner:
                 seen.add(p)
                 unique_payloads.append(p)
         
-        return unique_payloads[:15]  # Limit to avoid too many requests
+        return unique_payloads[:self._get_payload_limit()]
+    
+    def _get_payload_limit(self) -> int:
+        """Get payload limit based on current mode."""
+        limits = {
+            "quick": 15,
+            "standard": 30,
+            "thorough": 100,
+            "aggressive": 500,
+        }
+        return limits.get(self.payload_mode, 30)
+    
+    def get_dynamic_payloads(self, attack_type: str) -> list:
+        """
+        Get dynamically generated payloads for an attack type.
+        
+        Uses the Dynamic Payload Engine to generate thousands of
+        unique payload combinations based on context.
+        
+        Args:
+            attack_type: Type of attack (sqli, xss, ssti, ssrf, lfi, rce, xxe, nosqli)
+        
+        Returns:
+            List of GeneratedPayload objects (or strings if engine not available)
+        """
+        if self._payload_engine and HAS_DYNAMIC_PAYLOADS:
+            # Update context with detected WAF
+            if self._detected_waf and self._detected_waf.detected:
+                self._payload_engine.set_context(waf_type=self._detected_waf.waf_type)
+            
+            return list(self._payload_engine.generate(attack_type))
+        
+        # Fallback to InteractiveValidator payloads
+        fallback_map = {
+            'sqli': InteractiveValidator.get_sqli_payloads,
+            'nosqli': InteractiveValidator.get_nosql_payloads,
+            'xss': InteractiveValidator.get_xss_payloads,
+            'ssti': InteractiveValidator.get_ssti_payloads,
+            'lfi': InteractiveValidator.get_lfi_payloads,
+            'rce': InteractiveValidator.get_rce_payloads,
+            'xxe': InteractiveValidator.get_xxe_payloads,
+            'ssrf': InteractiveValidator.get_ssrf_payloads,
+        }
+        func = fallback_map.get(attack_type.lower())
+        if func:
+            return func()
+        return []
+    
+    def get_payload_stats(self) -> dict:
+        """Get statistics about payload generation."""
+        if self._payload_engine and HAS_DYNAMIC_PAYLOADS:
+            return self._payload_engine.get_stats()
+        return {"engine": "fallback", "mode": self.payload_mode}
     
     def _check_false_positive(self, indicator: str, indicator_type: str = "auto") -> tuple[bool, str]:
         """

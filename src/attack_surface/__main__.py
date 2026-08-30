@@ -1248,13 +1248,21 @@ def main() -> None:
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed verification output")
     parser.add_argument("--debate", action="store_true", help="Enable multi-agent hypothesis debate system")
     parser.add_argument("--output", "-o", type=str, help="Custom output directory")
+    parser.add_argument(
+        "--payload-mode", "-p",
+        type=str,
+        choices=["quick", "standard", "thorough", "aggressive"],
+        default="standard",
+        help="Payload generation mode: quick (~300), standard (~700), thorough (~3700), aggressive (~5500+ with WAF)"
+    )
     args = parser.parse_args()
 
     # Pass options to orchestrator
     report = ZeroDayOrchestrator().run(
         args.request,
         verbose=args.verbose,
-        enable_debate=args.debate
+        enable_debate=args.debate,
+        payload_mode=args.payload_mode
     )
     print(report.final)
     

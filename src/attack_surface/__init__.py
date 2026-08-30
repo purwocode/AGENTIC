@@ -68,6 +68,9 @@ from . import ai_enhancer
 # v1.0.0: API & Dashboard
 from . import api_server
 
+# v1.1.0: Dynamic Payload Engine
+from . import dynamic_payloads
+
 
 # ============================================================================
 # Convenience Re-exports

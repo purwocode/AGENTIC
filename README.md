@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/Tests-75%20passing-brightgreen.svg)](#tests)
-[![Version](https://img.shields.io/badge/Version-1.0.0-orange.svg)](#changelog)
+[![Version](https://img.shields.io/badge/Version-1.1.0-orange.svg)](#changelog)
 [![License](https://img.shields.io/badge/License-Research-red.svg)](#disclaimer)
 
 **🇮🇩 Framework multi-agent untuk zero-day security research dengan live active scanning, WAF bypass, hypothesis debate system, dan auto-verification.**
@@ -83,7 +83,7 @@ Framework ini otomatis melakukan semua itu!
    │   • SQL Injection (50 payload)
    │   • XSS (38 payload)
    │   • SSRF, SSTI, LFI, RCE, XXE
-   │   • Total: 37 kategori, 573+ payload
+   │   • Total: 37 kategori, 573+ base → 5500+ dengan dynamic engine
    ├── ⚙️ Bagaimana?
    │   • Kirim payload + encoding bypass WAF
    │   • Bandingkan response dengan baseline
@@ -122,15 +122,30 @@ Framework ini otomatis melakukan semua itu!
 # Install
 pip install -e .
 
-# Scan dengan izin
+# Scan dengan izin (mode standard: ~700 payload)
 python -m attack_surface "Zero-day research https://target.com dengan izin tertulis"
 
 # Mode verbose + debate
 python -m attack_surface "Pentest https://target.com authorized" --verbose --debate
 
+# Scan cepat (quick: ~300 payload)
+python -m attack_surface "Pentest https://target.com authorized" --payload-mode quick
+
+# Scan agresif dengan WAF bypass (aggressive: ~5500 payload)
+python -m attack_surface "Pentest https://target.com authorized" --payload-mode aggressive
+
 # Dengan API server
 python -m attack_surface --api --port 8080
 ```
+
+### 🎛️ Payload Modes
+
+| Mode | Payload Count | Use Case |
+|------|---------------|----------|
+| `quick` | ~300 | Recon cepat, deteksi kasar |
+| `standard` | ~700 | Scan harian standar |
+| `thorough` | ~3,700 | Pentest menyeluruh |
+| `aggressive` | ~5,500+ | Bypass WAF, full coverage |
 
 ## 📁 Struktur File
 
@@ -225,7 +240,7 @@ This framework automates all of that!
    │   • SQL Injection (50 payloads)
    │   • XSS (38 payloads)
    │   • SSRF, SSTI, LFI, RCE, XXE
-   │   • Total: 37 categories, 573+ payloads
+   │   • Total: 37 categories, 573+ base → 5500+ with dynamic engine
    ├── ⚙️ How?
    │   • Send payloads + WAF bypass encoding
    │   • Compare response with baseline
@@ -264,15 +279,30 @@ This framework automates all of that!
 # Install
 pip install -e .
 
-# Scan with authorization
+# Scan with authorization (standard mode: ~700 payloads)
 python -m attack_surface "Zero-day research https://target.com authorized"
 
 # Verbose + debate mode
 python -m attack_surface "Pentest https://target.com authorized" --verbose --debate
 
+# Quick scan (quick: ~300 payloads)
+python -m attack_surface "Pentest https://target.com authorized" --payload-mode quick
+
+# Aggressive scan with WAF bypass (aggressive: ~5500 payloads)
+python -m attack_surface "Pentest https://target.com authorized" --payload-mode aggressive
+
 # With API server
 python -m attack_surface --api --port 8080
 ```
+
+### 🎛️ Payload Modes
+
+| Mode | Payload Count | Use Case |
+|------|---------------|----------|
+| `quick` | ~300 | Fast recon, rough detection |
+| `standard` | ~700 | Daily standard scan |
+| `thorough` | ~3,700 | Comprehensive pentest |
+| `aggressive` | ~5,500+ | WAF bypass, full coverage |
 
 ## 📁 File Structure
 
@@ -1865,7 +1895,19 @@ Tool ini hanya boleh digunakan terhadap target dengan:
 
 ## Changelog
 
-### v1.0.0 (Current) - Production Ready
+### v1.1.0 (Current) - Dynamic Payload Engine
+- **Added:** `dynamic_payloads.py` - Full dynamic payload generation engine
+- **Added:** `PayloadMode` enum with 4 modes (QUICK, STANDARD, THOROUGH, AGGRESSIVE)
+- **Added:** `EncodingEngine` with 14 encoding types (url, unicode, html, hex, base64, etc.)
+- **Added:** `ObfuscationEngine` with case variation, comment injection, whitespace tricks
+- **Added:** `WAFBypassEngine` with 9 WAF-specific bypass strategies (Cloudflare, AWS WAF, ModSecurity, etc.)
+- **Added:** `DynamicPayloadEngine` with learning from successful payloads
+- **Added:** `--payload-mode` CLI option (quick/standard/thorough/aggressive)
+- **Improved:** Payload count: 573 base → 300-5500+ dynamic payloads
+- **Improved:** Removed hardcoded 15-payload limit per technique
+- **Improved:** Context-aware payload generation based on detected technology
+
+### v1.0.0 - Production Ready
 - **Added:** REST API server with authentication (`api_server.py`)
 - **Added:** Web UI dashboard with real-time status
 - **Added:** Distributed scanning coordinator (`DistributedScanner`)

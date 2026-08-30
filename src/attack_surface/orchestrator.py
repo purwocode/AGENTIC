@@ -76,12 +76,14 @@ class ZeroDayOrchestrator:
         self.enable_debate = enable_debate and HAS_DEBATE
         self._scan_result = None
         self._debate = None
+        self._payload_mode = "standard"
 
-    def run(self, user_request: str, verbose: bool = False, enable_debate: bool | None = None) -> ZeroDayReport:
+    def run(self, user_request: str, verbose: bool = False, enable_debate: bool | None = None, payload_mode: str = "standard") -> ZeroDayReport:
         # Override debate setting if explicitly provided
         if enable_debate is not None:
             self.enable_debate = enable_debate and HAS_DEBATE
         self.verbose = verbose
+        self._payload_mode = payload_mode
         
         safety = self.safety_gate.evaluate(user_request)
         if safety.decision is SafetyDecision.REFUSE:
@@ -102,6 +104,7 @@ class ZeroDayOrchestrator:
         print(f"\n[*] Starting active scan on: {target_url}")
         if self.verbose:
             print("[*] Verbose mode: ENABLED")
+        print(f"[*] Payload mode: {self._payload_mode.upper()}")
         print("[*] Phase 1: Reconnaissance...")
         
         # Initialize debate system if available
@@ -109,10 +112,20 @@ class ZeroDayOrchestrator:
             self._debate = HypothesisDebateSystem(verbose=self.verbose)
             print("[*] Hypothesis Debate System: ENABLED")
         
-        # Perform active scan
-        scanner = ActiveScanner(timeout=15, verify_ssl=False, verbose=getattr(self, 'verbose', False))
+        # Perform active scan with dynamic payloads
+        scanner = ActiveScanner(
+            timeout=15, 
+            verify_ssl=False, 
+            verbose=getattr(self, 'verbose', False),
+            payload_mode=self._payload_mode
+        )
         scan_result = scanner.scan_target(target_url)
         self._scan_result = scan_result
+        
+        # Show payload stats
+        payload_stats = scanner.get_payload_stats()
+        if payload_stats.get("total_generated", 0) > 0:
+            print(f"[*] Payloads generated: {payload_stats.get('total_generated', 'N/A')}")
         
         print(f"[*] Discovered {len(scan_result.endpoints)} endpoints")
         print(f"[*] Phase 2: Vulnerability Testing...")
