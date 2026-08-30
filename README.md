@@ -58,6 +58,42 @@ Filter false positive menggunakan [MISP Warning Lists](https://github.com/MISP/m
 - 👿 **Devil's Advocate** - Agent khusus yang menantang setiap hipotesis
 - 📈 **Confidence Scoring** - Kalkulasi confidence berdasarkan debate outcome
 
+### NEW: WAF Detection & Bypass (v0.8.0)
+Integrasi [waf-checker](https://github.com/SecH0us3/waf-checker) untuk deteksi dan bypass WAF:
+
+**Supported WAFs (20):**
+| WAF | Detection | Bypass |
+|-----|-----------|--------|
+| Cloudflare | cf-ray header, __cfduid cookie | Unicode, fullwidth chars, alternative quotes |
+| AWS WAF | x-amzn-requestid, x-amz-cf-id | Character set variations, unicode normalization |
+| ModSecurity | ModSecurity body patterns | Comment-based evasion, HPP |
+| Imperva | incap_ses cookies | Prototype pollution bypass |
+| Akamai | AkamaiGHost header | URL encoding, alternative separators |
+| F5 BIG-IP | BigIP cookies, F5 header | Session manipulation |
+| Sucuri | x-sucuri-id, sucuri-request | DNS bypass, cache poisoning |
+| Wordfence | wordfence_verifiedHuman | Cookie manipulation |
+| Azure Front Door | x-azure-ref header | Request routing bypass |
+| Google Cloud Armor | x-cloud-trace-context | Alt encoding, case variation |
+| + 10 more... | | |
+
+**Encoding Techniques (8):**
+- `double_url_encode()` - `'` → `%27` → `%2527`
+- `unicode_encode()` - `'` → `\u0027`
+- `html_entity_encode()` - `<` → `&#60;` / `&#x3c;`
+- `mixed_case_encode()` - `SELECT` → `sElEcT`
+- `hex_encode()` - SQL hex encoding `0x27`
+- `comment_obfuscate()` - `SELECT *` → `SELECT/**/*/`
+- `tab_obfuscate()` - Space → `%09`
+- `sql_obfuscation()` / `xss_obfuscation()` - Attack-specific variations
+
+**Scan Flow Integration:**
+```
+Phase 1: Reconnaissance
+Phase 1.5: WAF Detection ← NEW
+Phase 2: Vulnerability Testing (with WAF-aware payloads)
+Phase 3: Exploitation
+```
+
 ### NEW: Expanded Payload Library (v0.5.0)
 Sources terintegrasi dari komunitas security:
 - 📚 **[PayloadsAllTheThings](https://github.com/swisskyrepo/PayloadsAllTheThings)** - 80k+ stars, comprehensive web attack payloads

