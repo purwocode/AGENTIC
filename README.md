@@ -1,13 +1,49 @@
 # Attack Surface - Zero-Day Research Framework
 
-Framework multi-agent untuk zero-day security research dengan **live active scanning**, **hypothesis debate system**, dan **auto-verification**. Menghasilkan **validated payload**, **exploit code**, dan **PoC** dengan eliminasi false positive otomatis.
+<div align="center">
+
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/Tests-75%20passing-brightgreen.svg)](#tests)
+[![Version](https://img.shields.io/badge/Version-0.8.0-orange.svg)](#changelog)
+[![License](https://img.shields.io/badge/License-Research-red.svg)](#disclaimer)
+
+**Framework multi-agent untuk zero-day security research dengan live active scanning, WAF bypass, hypothesis debate system, dan auto-verification.**
+
+</div>
+
+---
+
+## 📑 Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Scan Flow](#scan-flow)
+- [Modules Detail](#modules-detail)
+- [WAF Detection & Bypass](#waf-detection--bypass-v080)
+- [Auto-Verification System](#auto-verification-system)
+- [Hypothesis Debate System](#hypothesis-debate-system)
+- [Output Format](#output-format)
+- [Tests](#tests)
+- [Changelog](#changelog)
+- [Disclaimer](#disclaimer)
+
+---
 
 ## Features
 
-### Core Scanning
-- 🌐 **Live Active Scanning** - Real HTTP requests ke target untuk deteksi vulnerability
-- 🔍 **Automated Reconnaissance** - Identifikasi endpoint, parameter, stack teknologi
-- 🎯 **Vulnerability Discovery** - 37 attack categories dengan 570+ payload variants
+### Core Capabilities
+| Feature | Description |
+|---------|-------------|
+| 🌐 **Live Active Scanning** | Real HTTP requests ke target untuk deteksi vulnerability |
+| 🔍 **Automated Reconnaissance** | Identifikasi endpoint, parameter, stack teknologi |
+| 🛡️ **WAF Detection & Bypass** | 20 WAF signatures, 8 encoding techniques |
+| 🧪 **Hypothesis Debate** | 6 agent roles mendebat setiap vulnerability |
+| ✅ **Auto-Verification** | Baseline comparison, token validation, false positive filtering |
+| 🎯 **Smart Test Selection** | Test prioritization berdasarkan detected tech stack |
+| 📊 **Evidence Collection** | SHA256 hash verification, timeline, CVSS scoring |
 
 ### NEW: Smart Test Selection (v0.7.0)
 Scanner otomatis memilih test berdasarkan detected tech stack:
@@ -147,166 +183,284 @@ Sources terintegrasi dari komunitas security:
 - 🔄 **Word Mutation** - Leet speak, case variations, suffix combinations (GENOVEVA-style)
 - 📁 **Evidence Collection** - Simpan findings terstruktur dengan hash verification
 
-## Architecture Overview
+---
+
+## Architecture
+
+### System Overview
 
 ```mermaid
 flowchart TB
-    subgraph INPUT["📥 INPUT"]
-        REQ["User Request"]
-        TARGET["Target URL"]
+    subgraph INPUT["📥 INPUT LAYER"]
+        REQ["User Request<br/>+ Target URL"]
+        AUTH["Authorization<br/>Keywords"]
     end
 
-    subgraph CORE["🏗️ CORE SYSTEM"]
-        CLI["__main__.py<br/>CLI Interface"]
-        SAFETY["safety.py<br/>Auth Gate"]
-        ORCH["orchestrator.py<br/>Pipeline"]
+    subgraph CORE["🏗️ CORE SYSTEM (src/attack_surface/)"]
+        CLI["__main__.py<br/>CLI Entry Point"]
+        SAFETY["safety.py<br/>Authorization Gate"]
+        ORCH["orchestrator.py<br/>Main Pipeline"]
+        MODELS["models.py<br/>Data Structures"]
     end
 
-    subgraph PAYLOADS["📚 PAYLOAD LIBRARY"]
-        direction LR
-        PL["payload_library.py<br/>500+ payloads"]
-        SOURCES["Sources:<br/>SecLists, PayloadsAllTheThings,<br/>FuzzDB, fuzz.txt, Assetnote"]
-    end
-
-    subgraph SCANNING["🔍 SCANNING ENGINE"]
-        SCANNER["scanner.py<br/>Active Scanner"]
+    subgraph SCANNER["🔍 SCANNER ENGINE (scanner.py)"]
+        direction TB
+        WAF_DET["WAFDetector<br/>20 WAF signatures"]
+        TECH["TechStack<br/>Detection"]
         BASELINE["Baseline<br/>Capture"]
-        VERIFY["Auto-<br/>Verification"]
-        ENCODER["Multi-Encoding<br/>WAF Bypass"]
+        VALIDATOR["InteractiveValidator<br/>Canary/Time/Math"]
+        ENCODER["PayloadEncoder<br/>8 techniques"]
+        BYPASS["WAFBypasses<br/>WAF-specific"]
     end
 
-    subgraph AGENTS["🤖 AGENT PIPELINE"]
+    subgraph AGENTS["🤖 AGENT PIPELINE (agents.py)"]
         AG1["🔍 ReconAgent"]
         AG2["🎯 VulnHunterAgent"]
         AG3["⚔️ ExploitDevAgent"]
         AG4["✅ PoCValidatorAgent"]
         AG5["📁 EvidenceCollector"]
         AG6["👿 DevilsAdvocate"]
-        AG1 --> AG2 --> AG3 --> AG4 --> AG5
-        AG4 --> AG6
     end
 
-    subgraph TOOLS["🛠️ ADVANCED TOOLS"]
-        DEBATE["hypothesis_debate.py<br/>Multi-Agent Debate"]
-        MUTATE["WordMutator<br/>CeWL/GENOVEVA style"]
+    subgraph TOOLS["🛠️ ADVANCED TOOLS (tools/)"]
+        DEBATE["hypothesis_debate.py"]
+        PAYLOADS["payload_library.py<br/>573+ payloads"]
         SHELL["reverse_shells.py"]
+        NMAP["nmap_arsenal.py"]
+        FILTER["warning_list_filter.py"]
     end
 
-    subgraph NETWORK["🌐 NETWORK TOOLS"]
-        NMAP["nmap_arsenal.py<br/>200 NSE scripts"]
-        SCANS["SYN, TCP, UDP<br/>Stealth, Vuln, Web"]
-        EVASION["IDS/WAF Evasion<br/>Fragmentation, Decoys"]
-    end
-
-    subgraph OUTPUT["📤 OUTPUT"]
-        FINDINGS["findings.json"]
-        EXPLOITS["exploits/"]
+    subgraph OUTPUT["📤 OUTPUT (Found/)"]
         REPORT["REPORT.txt"]
-        VERIFIED["✅ VERIFIED"]
-        FP["❌ FALSE POSITIVE"]
+        JSON["findings.json"]
+        EXPLOITS["exploits/*.py"]
+        SUMMARY["summary.json"]
     end
 
     INPUT --> CLI --> SAFETY
-    SAFETY -->|Authorized| ORCH
-    PAYLOADS --> SCANNER
+    SAFETY -->|"✅ Authorized"| ORCH
     ORCH --> SCANNER
-    SCANNER --> BASELINE --> VERIFY --> ENCODER
     ORCH --> AGENTS
+    SCANNER <--> TOOLS
     AGENTS --> DEBATE
+    SCANNER --> OUTPUT
     DEBATE --> OUTPUT
-    ORCH --> NMAP
-    NMAP --> SCANS --> EVASION
-    NMAP --> SCANNER
-    VERIFY --> VERIFIED
-    VERIFY --> FP
 
     style CORE fill:#1a365d,color:#fff
-    style PAYLOADS fill:#7c3aed,color:#fff
-    style SCANNING fill:#2d6a4f,color:#fff
+    style SCANNER fill:#2d6a4f,color:#fff
     style AGENTS fill:#b45309,color:#fff
-    style TOOLS fill:#0d9488,color:#fff
+    style TOOLS fill:#7c3aed,color:#fff
     style OUTPUT fill:#be185d,color:#fff
-    style VERIFIED fill:#2d6a4f,color:#fff
-    style FP fill:#9d0208,color:#fff
-    style NETWORK fill:#0891b2,color:#fff
 ```
 
-## Struktur
+### Component Diagram
 
-```text
-src/attack_surface/
-  scanner.py       # Active scanner dengan auto-verification & baseline comparison
-  agents.py        # 5 agent: Recon, VulnHunter, ExploitDev, PoCValidator, EvidenceCollector
-  models.py        # Data models + LiveScannerModel untuk real scan results
-  orchestrator.py  # Pipeline dengan hypothesis debate integration
-  safety.py        # Authorization gate (izin tertulis, bug bounty, pentest contract)
-  __main__.py      # CLI dengan auto-save findings
+```mermaid
+flowchart LR
+    subgraph CLI["Entry Point"]
+        MAIN["__main__.py"]
+    end
 
-tools/                         # Advanced tools
-  payload_library.py           # 573 payloads dari SecLists, PayloadsAllTheThings, dll
-  payload_generator.py         # Dynamic payload generation dengan encoding
-  hypothesis_debate.py         # Multi-agent debate system
-  enhanced_scanner.py          # Scanner dengan full debate integration
-  reverse_shells.py            # Reverse shell payload generator
-  nmap_arsenal.py              # NEW: 200 NSE scripts, preset scans, evasion techniques
+    subgraph SAFETY["Authorization"]
+        GATE["SafetyGate"]
+        DECISION["SafetyDecision"]
+    end
 
-tests/
-  test_orchestrator.py
-  test_safety.py
+    subgraph ORCHESTRATOR["Pipeline Control"]
+        ZERO["ZeroDayOrchestrator"]
+        PHASES["AttackPhase"]
+        REPORT["ZeroDayReport"]
+    end
 
-Found/               # Output directory untuk findings
-  session_YYYYMMDD_HHMMSS/
-    REPORT.txt
-    findings.json
-    payloads.txt
-    summary.json
-    exploits/
+    subgraph SCANNER["Active Scanner"]
+        ACTIVE["ActiveScanner"]
+        WAF["WAFDetector"]
+        ENCODE["PayloadEncoder"]
+        INTERACTIVE["InteractiveValidator"]
+        BASELINE["BaselineResponse"]
+        TECH["TechStack"]
+    end
+
+    subgraph MODELS["Data Models"]
+        FINDING["ZeroDayFinding"]
+        PAYLOAD["ExploitPayload"]
+        POC["ProofOfConcept"]
+        LIVE["LiveScannerModel"]
+    end
+
+    subgraph AGENTS["Agent System"]
+        TURN["AgentTurn"]
+        AGENT["ZeroDayAgent"]
+        BUILD["build_agents()"]
+    end
+
+    MAIN --> GATE
+    GATE --> ZERO
+    ZERO --> ACTIVE
+    ZERO --> BUILD
+    ACTIVE --> WAF
+    ACTIVE --> ENCODE
+    ACTIVE --> INTERACTIVE
+    ACTIVE --> BASELINE
+    BUILD --> AGENT
+    AGENT --> TURN
+    ZERO --> REPORT
+    REPORT --> FINDING
+    FINDING --> PAYLOAD
+    FINDING --> POC
+
+    style CLI fill:#1a365d,color:#fff
+    style SAFETY fill:#dc2626,color:#fff
+    style ORCHESTRATOR fill:#2563eb,color:#fff
+    style SCANNER fill:#059669,color:#fff
+    style MODELS fill:#7c3aed,color:#fff
+    style AGENTS fill:#d97706,color:#fff
 ```
 
-## Quick Start
+---
 
-### Live Scan (Real Target)
+## Project Structure
+
+```
+attack-surface\
+│
+├── 📄 pyproject.toml          # Project configuration & dependencies
+├── 📄 README.md               # This documentation
+├── 📄 Story.md                # Development journey & detailed process
+│
+├── 📁 src/attack_surface/     # Main source code
+│   ├── 📄 __init__.py         # Package init, version info
+│   ├── 📄 __main__.py         # CLI entry point, argument parsing
+│   ├── 📄 orchestrator.py     # Main pipeline, ZeroDayOrchestrator
+│   ├── 📄 scanner.py          # Active scanner (2500+ lines)
+│   │   ├── WAFDetector        # 20 WAF signature detection
+│   │   ├── WAFBypasses        # WAF-specific bypass utilities
+│   │   ├── PayloadEncoder     # 8 encoding techniques
+│   │   ├── InteractiveValidator # Canary, time, math validation
+│   │   ├── ActiveScanner      # Main scanning engine
+│   │   └── TechStack          # Technology detection
+│   ├── 📄 agents.py           # 5 agent definitions
+│   │   ├── ReconAgent         # Reconnaissance & discovery
+│   │   ├── VulnHunterAgent    # Vulnerability hunting
+│   │   ├── ExploitDevAgent    # Exploit development
+│   │   ├── PoCValidatorAgent  # PoC validation
+│   │   └── EvidenceCollector  # Evidence collection
+│   ├── 📄 models.py           # Data models & structures
+│   │   ├── ExploitPayload     # Payload representation
+│   │   ├── ProofOfConcept     # PoC with evidence
+│   │   ├── ZeroDayFinding     # Complete finding
+│   │   └── LiveScannerModel   # Model with scan results
+│   └── 📄 safety.py           # Authorization gate
+│       ├── SafetyGate         # Main gate class
+│       ├── SafetyDecision     # ALLOW/REFUSE enum
+│       └── SafetyResult       # Gate result
+│
+├── 📁 tools/                  # Advanced tooling
+│   ├── 📄 payload_library.py  # 573+ payloads from SecLists, etc.
+│   ├── 📄 payload_generator.py # Dynamic payload generation
+│   ├── 📄 hypothesis_debate.py # Multi-agent debate system
+│   ├── 📄 enhanced_scanner.py # Scanner with debate integration
+│   ├── 📄 reverse_shells.py   # Reverse shell generator
+│   ├── 📄 nmap_arsenal.py     # 200 NSE scripts, evasion
+│   └── 📄 warning_list_filter.py # MISP false positive filter
+│
+├── 📁 tests/                  # Test suite (75 tests)
+│   ├── 📄 test_scanner.py     # Scanner tests (40 tests)
+│   │   ├── WAFDetectorTests
+│   │   ├── PayloadEncoderTests
+│   │   ├── WAFBypassesTests
+│   │   └── InteractiveValidatorTests
+│   ├── 📄 test_agents.py      # Agent tests (11 tests)
+│   ├── 📄 test_models.py      # Model tests (16 tests)
+│   ├── 📄 test_orchestrator.py # Orchestrator tests
+│   └── 📄 test_safety.py      # Safety gate tests
+│
+└── 📁 Found/                  # Output directory
+    └── 📁 session_YYYYMMDD_HHMMSS/
+        ├── 📄 REPORT.txt      # Main report
+        ├── 📄 findings.json   # Structured findings
+        ├── 📄 payloads.txt    # All payloads used
+        ├── 📄 summary.json    # Scan summary
+        └── 📁 exploits/       # Generated exploit scripts
+            ├── 📄 nosql_injection.py
+            ├── 📄 sqli_exploit.py
+            └── 📄 attack_chain.sh
+```
+
+### Module Dependencies
+
+```mermaid
+graph TD
+    MAIN["__main__.py"] --> ORCH["orchestrator.py"]
+    MAIN --> MODELS["models.py"]
+    ORCH --> AGENTS["agents.py"]
+    ORCH --> MODELS
+    ORCH --> SAFETY["safety.py"]
+    ORCH --> SCANNER["scanner.py"]
+    AGENTS --> MODELS
+    SCANNER --> MODELS
+
+    subgraph EXTERNAL["External Tools"]
+        DEBATE["hypothesis_debate.py"]
+        PAYLOADS["payload_library.py"]
+        FILTER["warning_list_filter.py"]
+    end
+
+    ORCH -.-> DEBATE
+    SCANNER -.-> FILTER
+
+    style MAIN fill:#1a365d,color:#fff
+    style ORCH fill:#2563eb,color:#fff
+    style SCANNER fill:#059669,color:#fff
+    style AGENTS fill:#d97706,color:#fff
+    style MODELS fill:#7c3aed,color:#fff
+    style SAFETY fill:#dc2626,color:#fff
+```
+
+---
+
+## Installation
+
+### Requirements
+- Python 3.10+
+- `requests` library (untuk HTTP scanning)
+
+### Install
+
 ```powershell
-$env:PYTHONPATH = "src"
-python -m attack_surface "Zero-day research https://target.example.com dengan izin tertulis"
-```
+# Clone repository
+git clone https://github.com/purwocode/AGENTIC.git
+cd "ATTACK SURFACE"
 
-### Install & Run
-```powershell
+# Install in development mode
 python -m pip install -e .
-attack-surface "Zero-day research https://api.target.com dengan bug bounty authorization"
+
+# Or set PYTHONPATH manually
+$env:PYTHONPATH = "src"
 ```
+
+---
 
 ## Usage
 
-### Basic Scan
-```powershell
-# Scan target dengan otorisasi bug bounty
-python -m attack_surface "Zero-day research https://target.com dengan bug bounty"
+### Basic Commands
 
-# Scan API endpoint spesifik
-python -m attack_surface "Test https://api.target.com/v1 security dengan izin tertulis"
-```
-
-### With Hypothesis Debate (Recommended)
 ```powershell
-# Enable debate untuk validation yang lebih akurat
-python -m attack_surface "Security research https://target.com dengan izin tertulis" --debate
-```
+# Live scan dengan authorization
+python -m attack_surface "Zero-day research https://target.com dengan izin tertulis"
 
-### Verbose Mode (Debug)
-```powershell
-# Lihat semua verification details
-python -m attack_surface "Test https://target.com dengan authorized pentest" --verbose
-```
+# With hypothesis debate (recommended)
+python -m attack_surface "Security research https://target.com dengan bug bounty" --debate
 
-### Offline Mode (tanpa target URL)
-```powershell
-# Analisis berbasis knowledge tanpa live scan
-python -m attack_surface "Analisis vulnerability endpoint login dengan izin tertulis"
+# Verbose mode for debugging
+python -m attack_surface "Test https://api.target.com dengan authorized pentest" --verbose
+
+# Combined options
+python -m attack_surface "Zero-day research https://target.com dengan izin tertulis" --verbose --debate
 ```
 
 ### CLI Options
+
 | Option | Description |
 |--------|-------------|
 | `--debate` | Enable multi-agent hypothesis debate system |
@@ -314,85 +468,344 @@ python -m attack_surface "Analisis vulnerability endpoint login dengan izin tert
 | `--no-save` | Don't save findings to disk |
 | `--output DIR` | Custom output directory |
 
-### Authorization Keywords
-Request harus mengandung salah satu keyword otorisasi:
-- `izin tertulis`
-- `dengan izin`
+### Authorization Keywords (Required)
+
+Request **harus** mengandung salah satu keyword:
+- `izin tertulis` / `dengan izin`
 - `bug bounty`
 - `pentest contract`
 - `authorized`
 - `security research`
+- `internal audit`
+- `vulnerability disclosure`
 
-## Live Scanner
+---
 
-Scanner melakukan HTTP-based testing dengan **auto-verification**:
+## Scan Flow
 
-| Test Type | Description | Payloads | Verification |
-|-----------|-------------|----------|--------------|
-| **NoSQL Injection** | MongoDB operator injection | `$gt`, `$ne`, `$exists`, `$regex`, `$where` | Baseline + Token validation |
-| **SQL Injection** | Classic SQLi detection | `' OR '1'='1`, `UNION SELECT`, time-based | Error-based + Time-based |
-| **JWT Vulnerabilities** | Algorithm confusion | `alg:none`, weak secret detection | Protected resource access |
-| **Auth Bypass** | Authentication weaknesses | Default creds, type juggling, empty auth | Token extraction + validation |
-| **XSS** | Cross-site scripting | Reflected XSS in parameters | Payload reflection check |
-| **SSRF** | Server-side request forgery | Internal IP probing, localhost access | Metadata response check |
-| **LFI** | Local file inclusion | Path traversal, wrapper protocols | File content indicators |
-| **RCE** | Remote code execution | Command injection, sleep-based | Time-based detection |
+### Complete Scan Pipeline
 
-### Auto-Verification Process
+```mermaid
+flowchart TD
+    subgraph PHASE0["📥 PHASE 0: INPUT"]
+        REQ["User Request"]
+        URL["Extract Target URL"]
+    end
+
+    subgraph PHASE1["🔍 PHASE 1: RECONNAISSANCE"]
+        TECH["Detect Tech Stack<br/>(Server, Framework, Language, DB)"]
+        ENDPOINTS["Discover Endpoints<br/>(30+ common paths)"]
+    end
+
+    subgraph PHASE1_5["🛡️ PHASE 1.5: WAF DETECTION"]
+        WAF_PROBE["Send probe payloads"]
+        WAF_DETECT["Detect WAF signatures"]
+        WAF_BYPASS["Load bypass techniques"]
+    end
+
+    subgraph PHASE2["📋 PHASE 2: TEST PLANNING"]
+        SMART["Smart Test Selection<br/>(based on tech stack)"]
+        PRIORITY["Priority Tests<br/>(high relevance)"]
+        SECONDARY["Secondary Tests<br/>(medium relevance)"]
+    end
+
+    subgraph PHASE3["🎯 PHASE 3: VULNERABILITY TESTING"]
+        direction TB
+        BASELINE["Capture Baseline<br/>(invalid credentials)"]
+        PAYLOADS["Generate WAF-aware<br/>Payloads"]
+        TEST["Execute Tests<br/>(8 test types integrated)"]
+        INTERACTIVE["Interactive Validation<br/>(canary, time, math)"]
+    end
+
+    subgraph PHASE4["🧪 PHASE 4: HYPOTHESIS DEBATE"]
+        PROPOSE["Propose Hypothesis"]
+        SUPPORT["Support/Refute Evidence"]
+        DEVIL["Devil's Advocate Challenge"]
+        EVALUATE["Evaluate Verdict"]
+    end
+
+    subgraph PHASE5["📤 PHASE 5: OUTPUT"]
+        VERIFIED["✅ VERIFIED<br/>vulnerabilities"]
+        MANUAL["⚠️ NEEDS MANUAL<br/>verification"]
+        FP["❌ FALSE POSITIVES<br/>filtered"]
+        SAVE["💾 Save to<br/>Found/session_*/"]
+    end
+
+    PHASE0 --> PHASE1
+    PHASE1 --> PHASE1_5
+    PHASE1_5 --> PHASE2
+    PHASE2 --> PHASE3
+    PHASE3 --> PHASE4
+    PHASE4 --> PHASE5
+
+    style PHASE0 fill:#1a365d,color:#fff
+    style PHASE1 fill:#2563eb,color:#fff
+    style PHASE1_5 fill:#dc2626,color:#fff
+    style PHASE2 fill:#7c3aed,color:#fff
+    style PHASE3 fill:#059669,color:#fff
+    style PHASE4 fill:#d97706,color:#fff
+    style PHASE5 fill:#be185d,color:#fff
+    style VERIFIED fill:#16a34a,color:#fff
+    style FP fill:#dc2626,color:#fff
+    style MANUAL fill:#d97706,color:#fff
+```
+
+### Test Types with WAF Bypass Integration
+
+| Test Type | Methods | WAF Bypass |
+|-----------|---------|------------|
+| **SQL Injection** | Time-based, Union, Error-based | ✅ 15 variations |
+| **NoSQL Injection** | MongoDB operators, $where | ✅ 15 variations |
+| **XSS** | Reflected, Event handler, SVG | ✅ 15 variations |
+| **SSRF** | Cloud metadata, File protocol | ✅ 15 variations |
+| **SSTI** | Jinja2, Twig, ERB, Mako | ✅ 15 variations |
+| **LFI** | Path traversal, PHP wrappers | ✅ 15 variations |
+| **XXE** | External entity, Parameter entity | ✅ 15 variations |
+| **RCE** | Command separators, Backticks | ✅ 15 variations |
+
+---
+
+## Modules Detail
+
+### scanner.py (2500+ lines)
+
+Core scanning engine dengan:
+
+#### Classes & Functions
+
+| Class | Purpose |
+|-------|---------|
+| `HttpResponse` | Captured HTTP response data |
+| `EndpointInfo` | Discovered endpoint information |
+| `TechStack` | Detected technology stack |
+| `VulnTestResult` | Vulnerability test result |
+| `ScanResult` | Complete scan result |
+| `BaselineResponse` | Baseline for comparison |
+| `InteractivePayload` | Payload with canary validation |
+| `InteractiveValidator` | Canary/time/math validation |
+| `WAFSignature` | WAF detection signature |
+| `WAFDetectionResult` | WAF detection result |
+| `PayloadEncoder` | 8 encoding techniques |
+| `WAFBypasses` | WAF-specific bypass utilities |
+| `WAFDetector` | WAF detection engine |
+| `ActiveScanner` | Main scanning class |
+
+#### Key Methods
+
+```python
+# ActiveScanner methods
+scanner.scan_target(url)           # Full scan
+scanner._detect_waf(url)           # WAF detection
+scanner._detect_tech_stack(url)    # Tech detection
+scanner._discover_endpoints(url)    # Endpoint discovery
+scanner._capture_baseline(url)      # Baseline capture
+scanner._get_waf_bypass_payloads()  # Get bypass variations
+
+# Test methods (8 total with WAF bypass)
+scanner._test_sql_injection()
+scanner._test_nosql_injection()
+scanner._test_xss()
+scanner._test_ssrf()
+scanner._test_ssti()
+scanner._test_lfi()
+scanner._test_xxe()
+scanner._test_rce()
+```
+
+### agents.py
+
+5 specialized agents:
+
+| Agent | Role | Output |
+|-------|------|--------|
+| `ReconAgent` | Reconnaissance | Endpoints, tech stack |
+| `VulnHunterAgent` | Vulnerability hunting | Payloads, hypotheses |
+| `ExploitDevAgent` | Exploit development | Working exploit code |
+| `PoCValidatorAgent` | PoC validation | Verified/FP status |
+| `EvidenceCollectorAgent` | Evidence collection | Hashes, timeline |
+
+### models.py
+
+Data structures:
+
+| Model | Fields |
+|-------|--------|
+| `ExploitPayload` | name, category, payload, target_component, cve_reference, confidence |
+| `ProofOfConcept` | title, vulnerability_type, steps, payload, expected_result, actual_result, evidence_hash, verified |
+| `ZeroDayFinding` | id, title, severity, vulnerability_class, attack_vector, payloads, poc, false_positive_checks, validation_status |
+| `LiveScannerModel` | name, scan_result + `complete()` method |
+
+### orchestrator.py
+
+Pipeline controller:
+
+| Class | Purpose |
+|-------|---------|
+| `ZeroDayReport` | Final report with findings |
+| `AttackPhase` | Phase tracking |
+| `ZeroDayOrchestrator` | Main orchestrator |
+
+#### Methods
+
+```python
+orchestrator.run(request, verbose, enable_debate)  # Main entry
+orchestrator._run_live_scan(request, url)          # Live scanning
+orchestrator._run_offline(request)                 # Offline analysis
+orchestrator._run_vulnerability_debate(scan_result) # Debate system
+```
+
+### safety.py
+
+Authorization gate:
+
+| Class | Purpose |
+|-------|---------|
+| `SafetyDecision` | ALLOW/REFUSE enum |
+| `SafetyResult` | Gate result with reasons |
+| `SafetyGate` | Main authorization gate |
+
+**Blocked terms:** `bypass refusal`, `ignore instructions`, etc.
+**Required terms:** `izin tertulis`, `bug bounty`, `authorized`, etc.
+
+---
+
+## WAF Detection & Bypass (v0.8.0)
+
+### Supported WAFs (20)
+
+| WAF | Detection Method | Bypass Techniques |
+|-----|------------------|-------------------|
+| **Cloudflare** | cf-ray header, __cfduid cookie | Unicode, fullwidth chars, alternative quotes |
+| **AWS WAF** | x-amzn-requestid, x-amz-cf-id | Character set variations, unicode normalization |
+| **ModSecurity** | ModSecurity body patterns | Comment-based evasion, HPP |
+| **Imperva** | incap_ses cookies | Prototype pollution bypass |
+| **Akamai** | AkamaiGHost header | URL encoding, alternative separators |
+| **F5 BIG-IP** | BigIP cookies, F5 header | Session manipulation |
+| **Sucuri** | x-sucuri-id, sucuri-request | DNS bypass, cache poisoning |
+| **Wordfence** | wordfence_verifiedHuman | Cookie manipulation |
+| **Azure Front Door** | x-azure-ref header | Request routing bypass |
+| **Google Cloud Armor** | x-cloud-trace-context | Alt encoding, case variation |
+| **Barracuda** | Barracuda headers | Parameter encoding |
+| **Citrix NetScaler** | ns_af cookies, NSC_ | Request smuggling |
+| **DDoS-Guard** | __ddg1_, __ddgid | Time-based bypass |
+| **FortiWeb** | FORTIWAFSID cookie | Method tampering |
+| **Palo Alto** | x-phx header | Encoding combinations |
+| **Sophos WAF** | sophos_waf_id | Header injection |
+| **Fastly** | x-served-by cache- | Origin direct access |
+| **Varnish** | x-varnish header | Cache bypass |
+| **LiteSpeed** | x-litespeed-cache | Rule bypass |
+| **Generic WAF** | Pattern matching | All techniques |
+
+### Encoding Techniques (8)
+
+```python
+# PayloadEncoder methods
+PayloadEncoder.double_url_encode(payload)    # ' → %27 → %2527
+PayloadEncoder.unicode_encode(payload)       # ' → \u0027
+PayloadEncoder.html_entity_encode(payload)   # < → &#60; / &#x3c;
+PayloadEncoder.mixed_case_encode(payload)    # SELECT → sElEcT
+PayloadEncoder.hex_encode(payload)           # SQL hex encoding 0x27
+PayloadEncoder.comment_obfuscate(payload)    # SELECT * → SELECT/**/*
+PayloadEncoder.tab_obfuscate(payload)        # Space → %09
+PayloadEncoder.newline_obfuscate(payload)    # Space → %0A
+```
+
+### WAF-Specific Bypass Classes
+
+```python
+# WAFBypasses static methods
+WAFBypasses.cloudflare_bypass(payload)      # Cloudflare-specific
+WAFBypasses.aws_waf_bypass(payload)         # AWS WAF-specific
+WAFBypasses.modsecurity_bypass(payload)     # ModSecurity-specific
+WAFBypasses.akamai_bypass(payload)          # Akamai-specific
+WAFBypasses.imperva_bypass(payload)         # Imperva-specific
+WAFBypasses.generic_bypass(payload)         # Universal techniques
+```
+
+### Detection Flow
+
+```mermaid
+flowchart LR
+    subgraph PROBE["1. PROBE"]
+        BASELINE["Get baseline<br/>response"]
+        TRIGGER["Send probe<br/>payloads"]
+    end
+
+    subgraph DETECT["2. DETECT"]
+        HEADERS["Check headers<br/>(cf-ray, x-amzn-*, etc.)"]
+        COOKIES["Check cookies<br/>(incap_ses, __cf*, etc.)"]
+        BODY["Check body<br/>patterns"]
+        STATUS["Check status<br/>(403, 406, 429)"]
+    end
+
+    subgraph RESULT["3. RESULT"]
+        WAF_TYPE["WAF Type"]
+        CONF["Confidence"]
+        BYPASS["Bypass<br/>Techniques"]
+    end
+
+    PROBE --> DETECT
+    DETECT --> RESULT
+```
+
+---
+
+## Auto-Verification System
+
+### Verification Process
 
 ```mermaid
 flowchart TD
     subgraph BASELINE["1. BASELINE CAPTURE"]
-        B1[Send request with<br/>random invalid credentials]
-        B2[Record baseline:<br/>status_code, body_hash,<br/>body_length, is_login]
-        B1 --> B2
+        B1["Send request with<br/>random invalid credentials"]
+        B2["Record: status_code,<br/>body_hash, body_length,<br/>is_login_page"]
     end
 
-    subgraph PAYLOAD["2. PAYLOAD TESTING"]
-        P1[Send request with<br/>attack payload]
-        P2[Get response]
-        P1 --> P2
+    subgraph TEST["2. PAYLOAD TESTING"]
+        T1["Send request with<br/>attack payload"]
+        T2["Capture response"]
     end
 
-    subgraph COMPARE["3. COMPARISON ANALYSIS"]
-        C1{Hash same<br/>as baseline?}
+    subgraph COMPARE["3. COMPARISON"]
+        C1{Same hash<br/>as baseline?}
         C2{New token<br/>appeared?}
-        C3{New user<br/>data?}
+        C3{User data<br/>in response?}
         C4{Still login<br/>page HTML?}
     end
 
-    subgraph TOKEN["4. TOKEN VALIDATION"]
-        T1[Extract token from response]
-        T2[Try access protected endpoints]
-        T3{401 → 200<br/>change?}
-        T1 --> T2 --> T3
+    subgraph VALIDATE["4. TOKEN VALIDATION"]
+        V1["Extract token"]
+        V2["Access protected<br/>endpoints"]
+        V3{Status change<br/>401 → 200?}
     end
 
-    subgraph RESULT["5. RESULT"]
-        FP[❌ FALSE POSITIVE]
-        VERIFIED[✅ VERIFIED]
-        MANUAL[⚠️ NEEDS MANUAL]
+    subgraph VERDICT["5. VERDICT"]
+        FP["❌ FALSE POSITIVE"]
+        VERIFIED["✅ VERIFIED"]
+        MANUAL["⚠️ NEEDS MANUAL"]
     end
 
-    BASELINE --> PAYLOAD
-    PAYLOAD --> C1
+    BASELINE --> TEST
+    TEST --> C1
     C1 -->|Yes| FP
     C1 -->|No| C2
-    C2 -->|Yes| TOKEN
+    C2 -->|Yes| VALIDATE
     C2 -->|No| C3
     C3 -->|Yes| VERIFIED
     C3 -->|No| C4
     C4 -->|Yes| FP
     C4 -->|No| MANUAL
-    T3 -->|Yes| VERIFIED
-    T3 -->|No| MANUAL
+    V1 --> V2 --> V3
+    V3 -->|Yes| VERIFIED
+    V3 -->|No| MANUAL
 
-    style VERIFIED fill:#2d6a4f,color:#fff
-    style FP fill:#9d0208,color:#fff
-    style MANUAL fill:#e85d04,color:#fff
+    style FP fill:#dc2626,color:#fff
+    style VERIFIED fill:#16a34a,color:#fff
+    style MANUAL fill:#d97706,color:#fff
 ```
 
-**Significance Scoring:**
+### Significance Scoring
+
 | Condition | Score |
 |-----------|-------|
 | Status changed to 200 | +30 |
@@ -401,159 +814,96 @@ flowchart TD
 | Bypassed login page | +25 |
 | Length diff >50% | +15 |
 
-### Hypothesis Debate System
+**Thresholds:**
+- Score ≥ 30: Significant change detected
+- Token validation: Confirms actual access
 
-Setiap vulnerability melalui proses debate multi-agent:
+### Interactive Validation Types
+
+| Type | Method | Example |
+|------|--------|---------|
+| `canary` | Unique string in response | `ASF_abc123_4f` in body |
+| `time` | Response delay > threshold | SLEEP(5) → >4500ms |
+| `math` | Math result in response | `7919*7927` → `62769713` |
+| `error` | Specific error pattern | `SQL syntax`, `MongoDB` |
+| `reflect` | Payload reflected unencoded | XSS canary in HTML |
+| `auth_bypass` | Auth indicators in 200 | Token/session data |
+
+---
+
+## Hypothesis Debate System
+
+### Debate Flow
 
 ```mermaid
 flowchart TD
-    subgraph PROPOSE["1. PROPOSE HYPOTHESIS"]
-        VH[🔍 VulnHunterAgent]
-        H1["📋 H-001: NoSQL Injection<br/>at /login endpoint"]
-        VH -->|proposes| H1
+    subgraph PROPOSE["1. PROPOSE"]
+        VH["🔍 VulnHunterAgent"]
+        HYP["📋 Hypothesis:<br/>NoSQL Injection at /login"]
+        VH -->|proposes| HYP
     end
 
-    subgraph DEBATE["2. MULTI-AGENT DEBATE"]
-        direction LR
-        POC["✅ PoCValidatorAgent<br/>SUPPORT +40%<br/>'Token found'"]
-        RECON["✅ ReconAgent<br/>SUPPORT +15%<br/>'Status 200'"]
-        DEVIL["❌ DevilsAdvocate<br/>REFUTE -30%<br/>'Login page HTML'"]
+    subgraph DEBATE["2. DEBATE"]
+        SUPPORT["✅ SUPPORT"]
+        REFUTE["❌ REFUTE"]
+        S1["PoCValidator: +40%<br/>'Token found'"]
+        S2["Recon: +15%<br/>'Status 200'"]
+        R1["Devil: -30%<br/>'Login page HTML'"]
     end
 
-    subgraph EVALUATE["3. EVALUATION"]
-        CALC[Calculate confidence<br/>50 + 40 + 15 - 30 = 75%]
-        CHECK{Confidence<br/>threshold?}
+    subgraph CALC["3. CALCULATE"]
+        SCORE["Confidence:<br/>50 + 40 + 15 - 30 = 75%"]
     end
 
     subgraph VERDICT["4. VERDICT"]
-        VAL["✅ VALIDATED<br/>≥80%"]
-        INC["⚠️ INCONCLUSIVE<br/>40-79%"]
-        REF["❌ REFUTED<br/><40%"]
+        VAL["✅ VALIDATED ≥80%"]
+        INC["⚠️ INCONCLUSIVE 40-79%"]
+        REF["❌ REFUTED <40%"]
     end
 
-    subgraph CHALLENGE["5. DEVIL'S ADVOCATE CHALLENGES"]
-        Q1["🤔 Honeypot response?"]
+    subgraph CHALLENGE["5. DEVIL'S ADVOCATE"]
+        Q1["🤔 Honeypot?"]
         Q2["🤔 Token functional?"]
         Q3["🤔 Actual privileges?"]
     end
 
-    H1 --> DEBATE
-    POC & RECON & DEVIL --> CALC
-    CALC --> CHECK
-    CHECK -->|"≥80%"| VAL
-    CHECK -->|"40-79%"| INC
-    CHECK -->|"<40%"| REF
+    HYP --> DEBATE
+    SUPPORT --> S1 & S2
+    REFUTE --> R1
+    DEBATE --> CALC
+    CALC --> VERDICT
     INC --> CHALLENGE
 
-    style VAL fill:#2d6a4f,color:#fff
-    style REF fill:#9d0208,color:#fff
-    style INC fill:#e85d04,color:#fff
-    style DEVIL fill:#6c757d,color:#fff
+    style VAL fill:#16a34a,color:#fff
+    style REF fill:#dc2626,color:#fff
+    style INC fill:#d97706,color:#fff
 ```
 
-### Agent Roles
+### Agent Roles in Debate
 
 | Agent | Role | Evidence Type |
 |-------|------|---------------|
-| **ReconAgent** | Reconnaissance & endpoint discovery | HTTP headers, status codes |
-| **VulnHunterAgent** | Propose vulnerabilities | Payload responses |
-| **ExploitDevAgent** | Develop working exploits | Successful exploitation |
-| **PoCValidatorAgent** | Validate PoC | Token validation, data access |
-| **DevilsAdvocateAgent** | Challenge all hypotheses | False positive indicators |
-| **EvidenceCollectorAgent** | Collect and hash evidence | Response hashes |
+| **VulnHunterAgent** | Propose hypotheses | Payload responses |
+| **ReconAgent** | Support with recon data | HTTP headers, status codes |
+| **PoCValidatorAgent** | Validate with PoC | Token validation, data access |
+| **ExploitDevAgent** | Support with exploits | Working exploit code |
+| **EvidenceCollectorAgent** | Collect evidence | Response hashes, timeline |
+| **DevilsAdvocateAgent** | Challenge everything | FP indicators, challenges |
 
-### Tech Stack Detection
-Scanner otomatis mendeteksi:
-- Server (nginx, Apache, IIS, etc.)
-- Frameworks (Express, Django, Flask, Laravel, etc.)
-- Languages (Python, Node.js, PHP, Java, etc.)
-- Auth mechanisms (JWT, OAuth, session-based)
+### Verdict Thresholds
 
-### Endpoint Discovery
-Scanner mencari endpoints umum:
-- `/api/v1/login`, `/api/v1/users`, `/api/v1/admin`
-- `/auth/login`, `/auth/token`, `/auth/refresh`
-- `/graphql`, `/api/graphql`
-- `/admin`, `/dashboard`, `/profile`
+| Verdict | Confidence | Action |
+|---------|------------|--------|
+| **VALIDATED** | ≥80% | Confirmed vulnerability |
+| **INCONCLUSIVE** | 40-79% | Needs manual verification |
+| **REFUTED** | <40% | Likely false positive |
 
-## Pipeline
-
-```mermaid
-flowchart TD
-    subgraph INPUT["📥 INPUT"]
-        REQ["User Request<br/>(dengan target URL)"]
-    end
-
-    subgraph SAFETY["🛡️ SAFETY GATE"]
-        SG{SafetyGate<br/>Authorization<br/>check}
-        BLOCK["🚫 BLOCKED<br/>No authorization"]
-    end
-
-    subgraph MODE["🔀 SCAN MODE"]
-        URL{URL Found?}
-        LIVE["🌐 LIVE SCAN<br/>ActiveScanner<br/>(HTTP requests)"]
-        OFFLINE["📚 OFFLINE<br/>Knowledge-based<br/>analysis"]
-    end
-
-    subgraph BASELINE["📊 BASELINE"]
-        CAP["Capture baseline<br/>for each endpoint"]
-    end
-
-    subgraph AGENTS["🤖 5 AGENTS"]
-        direction LR
-        A1["🔍 Recon"]
-        A2["🎯 VulnHunter"]
-        A3["⚔️ ExploitDev"]
-        A4["✅ PoCValidator"]
-        A5["📁 Evidence"]
-        A1 --> A2 --> A3 --> A4 --> A5
-    end
-
-    subgraph VERIFY["🔬 AUTO-VERIFICATION"]
-        COMP["Compare with baseline"]
-        TOKEN["Token validation"]
-        SCORE["Significance scoring"]
-        COMP --> TOKEN --> SCORE
-    end
-
-    subgraph DEBATE["💬 HYPOTHESIS DEBATE"]
-        HYP["Propose hypothesis"]
-        SUP["Support/Refute"]
-        DEVIL["Devil's Advocate"]
-        EVAL["Evaluate verdict"]
-        HYP --> SUP --> DEVIL --> EVAL
-    end
-
-    subgraph OUTPUT["📤 OUTPUT"]
-        VERIFIED["✅ VERIFIED<br/>vulnerabilities"]
-        FP["❌ FALSE POSITIVES<br/>filtered"]
-        MANUAL["⚠️ NEEDS MANUAL<br/>verification"]
-        SAVE["💾 Save to<br/>Found/session_*/"]
-    end
-
-    REQ --> SG
-    SG -->|"❌ No keyword"| BLOCK
-    SG -->|"✅ Authorized"| URL
-    URL -->|Yes| LIVE
-    URL -->|No| OFFLINE
-    LIVE --> CAP
-    CAP --> AGENTS
-    OFFLINE --> AGENTS
-    AGENTS --> VERIFY
-    VERIFY --> DEBATE
-    DEBATE --> VERIFIED & FP & MANUAL
-    VERIFIED --> SAVE
-    MANUAL --> SAVE
-
-    style VERIFIED fill:#2d6a4f,color:#fff
-    style FP fill:#9d0208,color:#fff
-    style MANUAL fill:#e85d04,color:#fff
-    style BLOCK fill:#9d0208,color:#fff
-```
+---
 
 ## Output Format
 
-### findings.json (Live Scan Result)
+### findings.json
+
 ```json
 {
   "id": "VULN-001",
@@ -678,232 +1028,161 @@ Exploit scripts di-generate dengan **target URL sebenarnya**:
 
 ## Tests
 
+### Running Tests
+
 ```powershell
+# Set PYTHONPATH and run all tests
 $env:PYTHONPATH = "src"
 python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_scanner.py -v
+
+# Run with coverage
+python -m pytest tests/ --cov=attack_surface --cov-report=html
 ```
+
+### Test Coverage (75 tests)
+
+| Test File | Tests | Coverage |
+|-----------|-------|----------|
+| `test_scanner.py` | 40 | WAFDetector, PayloadEncoder, WAFBypasses, InteractiveValidator, TechStack |
+| `test_agents.py` | 11 | AgentTurn, ZeroDayAgent, build_agents |
+| `test_models.py` | 16 | ExploitPayload, ProofOfConcept, ZeroDayFinding, LiveScannerModel |
+| `test_orchestrator.py` | 4 | ZeroDayOrchestrator, ZeroDayReport |
+| `test_safety.py` | 4 | SafetyGate, SafetyDecision, SafetyResult |
+
+### Test Categories
+
+```
+tests/test_scanner.py
+├── WAFDetectorTests (8 tests)
+│   ├── test_cloudflare_detection
+│   ├── test_aws_waf_detection
+│   ├── test_modsecurity_detection
+│   ├── test_imperva_detection
+│   ├── test_captcha_detection
+│   ├── test_no_waf_detection
+│   ├── test_get_probe_payloads
+│   └── test_get_supported_wafs
+├── PayloadEncoderTests (8 tests)
+│   ├── test_double_url_encode
+│   ├── test_unicode_encode
+│   ├── test_html_entity_encode
+│   ├── test_mixed_case_encode
+│   ├── test_hex_encode
+│   ├── test_comment_obfuscate
+│   ├── test_sql_obfuscation
+│   └── test_xss_obfuscation
+├── WAFBypassesTests (6 tests)
+│   ├── test_cloudflare_bypass
+│   ├── test_aws_waf_bypass
+│   ├── test_modsecurity_bypass
+│   ├── test_akamai_bypass
+│   ├── test_imperva_bypass
+│   └── test_get_waf_specific_bypasses
+├── InteractiveValidatorTests (13 tests)
+│   ├── test_generate_canary
+│   ├── test_generate_math_canary
+│   ├── test_get_sqli_payloads
+│   ├── test_get_nosql_payloads
+│   ├── test_get_ssti_payloads
+│   ├── test_get_xss_payloads
+│   ├── test_get_lfi_payloads
+│   ├── test_get_rce_payloads
+│   ├── test_get_xxe_payloads
+│   ├── test_get_ssrf_payloads
+│   ├── test_validate_response_canary
+│   ├── test_validate_response_time
+│   └── test_validate_response_math
+└── TechStackTests (5 tests)
+    └── test_tech_stack_fields
+```
+
+---
 
 ## Requirements
 
-- Python 3.10+
-- `requests` library (untuk HTTP scanning)
+- **Python 3.10+**
+- **requests** library (untuk HTTP scanning)
 - Target dengan otorisasi yang valid
+
+---
 
 ## Disclaimer
 
 ⚠️ **For authorized security research only.**
 
 Tool ini hanya boleh digunakan terhadap target dengan:
-- Izin tertulis dari pemilik sistem
-- Bug bounty program yang aktif
-- Kontrak pentest yang valid
-- Otorisasi resmi lainnya
+- ✅ Izin tertulis dari pemilik sistem
+- ✅ Bug bounty program yang aktif
+- ✅ Kontrak pentest yang valid
+- ✅ Otorisasi resmi lainnya
 
-Penggunaan tanpa otorisasi adalah ilegal dan tidak etis.
-
----
-
-## Roadmap
-
-```mermaid
-flowchart LR
-    subgraph DONE["✅ COMPLETED"]
-        V1["v0.1.0<br/>Core Framework"]
-        V2["v0.2.0<br/>Auto-Verification"]
-        V3["v0.3.0<br/>Hypothesis Debate"]
-        V4["v0.4.0<br/>Payload Generation"]
-        V5["v0.5.0<br/>Payload Library<br/>25+ Categories, 500+ Payloads"]
-        V1 --> V2 --> V3 --> V4 --> V5
-    end
-
-    subgraph PROGRESS["🚧 IN PROGRESS"]
-        V6["v0.6.0<br/>WAF Bypass<br/>OOB Testing"]
-    end
-
-    subgraph PLANNED["📋 PLANNED"]
-        V7["v0.7.0<br/>Chaining"]
-        V8["v0.8.0<br/>Reporting"]
-        V9["v0.9.0<br/>AI Enhancement"]
-        V10["v1.0.0<br/>Production"]
-        V7 --> V8 --> V9 --> V10
-    end
-
-    V5 --> V6 --> V7
-
-    style V1 fill:#2d6a4f,color:#fff
-    style V2 fill:#2d6a4f,color:#fff
-    style V3 fill:#2d6a4f,color:#fff
-    style V4 fill:#2d6a4f,color:#fff
-    style V5 fill:#2d6a4f,color:#fff
-    style V6 fill:#e85d04,color:#fff
-    style V7 fill:#6c757d,color:#fff
-    style V8 fill:#6c757d,color:#fff
-    style V9 fill:#6c757d,color:#fff
-    style V10 fill:#7c3aed,color:#fff
-```
-
-### ✅ v0.1.0 - Core Framework (Completed)
-- [x] Multi-agent architecture (5 agents)
-- [x] Safety gate dengan authorization keywords
-- [x] Live HTTP scanning
-- [x] Basic vulnerability detection (NoSQL, SQLi, JWT, XSS, SSRF)
-- [x] Auto-save findings ke disk
-- [x] Exploit code generation
-
-### ✅ v0.2.0 - Auto-Verification (Completed)
-- [x] Baseline comparison system
-- [x] Token extraction & validation
-- [x] False positive filtering
-- [x] Significance scoring
-- [x] Response hash comparison
-- [x] Login page detection
-
-### ✅ v0.3.0 - Hypothesis Debate (Completed)
-- [x] Multi-agent debate system
-- [x] 6 agent roles (termasuk Devil's Advocate)
-- [x] Support/Refute mechanism
-- [x] Confidence scoring berdasarkan debate
-- [x] Debate summary & export
-
-### ✅ v0.4.0 - Payload Generation (Completed)
-- [x] Dynamic payload generator
-- [x] Multiple encoding (URL, Base64, Hex, Unicode)
-- [x] Payload mutation
-- [x] Reverse shell generator (Bash, Python, PHP, etc.)
-- [x] LFI & RCE payloads
-
-### ✅ v0.5.0 - Expanded Payload Library (Completed)
-- [x] Integrated PayloadsAllTheThings (80k+ stars)
-- [x] Integrated SecLists wordlists/patterns (73k+ stars)
-- [x] Integrated FuzzDB attack patterns
-- [x] Integrated fuzz.txt dangerous files
-- [x] 25+ attack categories (SQL, NoSQL, XSS, SSRF, SSTI, XXE, LFI, RCE, JWT, etc.)
-- [x] 500+ individual payloads with metadata
-- [x] 10+ encoding variants per payload (WAF bypass)
-- [x] Risk level classification (low/medium/high/critical)
-- [x] WordMutator: CeWL/GENOVEVA-style password mutations
-- [x] TargetWordlistGenerator: Extract words from target HTML
-- [x] Source attribution for each payload
-
-### 🚧 v0.6.0 - WAF Bypass & OOB Testing (In Progress)
-- [ ] Advanced WAF fingerprinting
-- [ ] Rate limiting detection & evasion
-- [ ] Blind injection detection
-- [ ] Out-of-band (OOB) callback server
-- [ ] DNS exfiltration verification
-- [ ] HTTP callback verification
-
-### 📋 v0.7.0 - Chaining & Automation (Planned)
-- [ ] Vulnerability chaining (Auth Bypass → RCE)
-- [ ] Automated attack chain execution
-- [ ] Multi-step exploitation
-- [ ] Session management & token refresh
-- [ ] Parallel endpoint testing
-
-### 📋 v0.8.0 - Reporting & Integration (Planned)
-- [ ] HTML/PDF report generation
-- [ ] CVSS scoring integration
-- [ ] Nuclei template generation
-- [ ] Burp Suite integration
-- [ ] Export ke security platforms (HackerOne, Bugcrowd)
-
-### 📋 v0.9.0 - AI Enhancement (Planned)
-- [ ] LLM-powered payload mutation
-- [ ] Intelligent fuzzing
-- [ ] Pattern learning dari successful exploits
-- [ ] Natural language vulnerability description
-- [ ] Auto-suggest next attack vectors
-
-### 📋 v1.0.0 - Production Ready (Future)
-- [ ] Web UI dashboard
-- [ ] API mode untuk integrasi
-- [ ] Distributed scanning
-- [ ] Vulnerability database integration
-- [ ] Compliance checking (OWASP, PCI-DSS)
-
----
-
-## Payload Library Usage
-
-```python
-from tools.payload_library import PayloadLibrary, PayloadCategory, WordMutator
-
-# Initialize library
-lib = PayloadLibrary()
-
-# Get statistics
-stats = lib.stats()
-print(f"Total payloads: {stats['total']}")
-
-# Get payloads by category
-sqli = lib.get_by_category(PayloadCategory.SQL_INJECTION)
-for payload in sqli[:5]:
-    print(f"[{payload.risk_level}] {payload.description}")
-    print(f"  Raw: {payload.raw[:50]}...")
-    print(f"  URL encoded: {payload.encoded_variants['url'][:50]}...")
-
-# Get critical payloads only
-critical = lib.get_critical()
-
-# Search payloads
-ssrf = lib.search("metadata")
-for p in ssrf:
-    print(f"{p.category.name}: {p.raw}")
-
-# Generate password mutations (CeWL/GENOVEVA style)
-mutator = WordMutator()
-mutations = mutator.generate_mutations("password", depth=1)
-print(mutations[:10])  # ['Password', 'PASSWORD', 'p4ssword', 'p4ssword!', ...]
-```
+❌ Penggunaan tanpa otorisasi adalah **ilegal** dan tidak etis.
 
 ---
 
 ## Changelog
 
-### v0.5.0 (Current)
-- Added: Expanded Payload Library with 500+ payloads
-- Added: 25+ attack categories from security research sources
-- Added: PayloadsAllTheThings integration (SQLi, XSS, SSRF, SSTI, XXE, etc.)
-- Added: SecLists patterns (discovery, fuzzing, passwords)
-- Added: FuzzDB attack patterns
-- Added: fuzz.txt dangerous files wordlist
-- Added: Prompt Injection payloads for AI/LLM testing
-- Added: Request Smuggling (CL.TE, TE.CL) payloads
-- Added: Prototype Pollution payloads
-- Added: WordMutator class (CeWL/GENOVEVA-style mutations)
-- Added: TargetWordlistGenerator (extract words from HTML)
-- Added: 10+ encoding variants per payload (WAF bypass)
-- Added: Risk level classification (low/medium/high/critical)
-- Added: Source attribution for each payload
+### v0.8.0 (Current) - WAF Bypass Integration
+- **Added:** WAF detection with 20 WAF signatures
+- **Added:** WAF-specific bypass techniques (8 encoding methods)
+- **Added:** `WAFDetector` class with comprehensive signature matching
+- **Added:** `PayloadEncoder` class with 8 encoding techniques
+- **Added:** `WAFBypasses` class with WAF-specific bypass utilities
+- **Added:** WAF bypass integration into 8 vulnerability test methods
+- **Added:** Captcha detection (Cloudflare Turnstile, reCAPTCHA, hCaptcha)
+- **Added:** `test_scanner.py` - 40 tests for scanner module
+- **Added:** `test_agents.py` - 11 tests for agents module
+- **Added:** `test_models.py` - 16 tests for models module
+- **Total tests:** 75 (all passing)
 
-### v0.4.0
-- Added: Hypothesis Debate System dengan 6 agent roles
-- Added: Auto-verification dengan baseline comparison
-- Added: Token extraction dan validation
-- Added: False positive filtering (18 FP → 0 dalam test)
-- Added: Payload generator dengan encoding/mutation
-- Added: Reverse shell generator
-- Added: Verbose logging untuk debugging
-- Fixed: Unicode encoding issues pada Windows
-- Fixed: JWT false positive (login page detection)
-- Fixed: WordPress detection (wp-json, wp-content)
+### v0.7.0 - Smart Test Selection
+- **Added:** Tech stack-based test prioritization
+- **Added:** 13 new test categories (SSTI, LFI, XXE, RCE, CRLF, etc.)
+- **Added:** Feature-based test selection (GraphQL, file upload, URL params)
+- **Added:** Database-specific test selection (MongoDB vs MySQL)
+- **Added:** Framework-specific tests (PHP, Python, Node.js, Java, .NET, Ruby)
 
-### v0.3.0
-- Added: SSL warning suppression
-- Added: SSRF timeout handling
-- Fixed: Evidence truncation (100→500 chars)
+### v0.6.0 - MISP Warning List Integration
+- **Added:** MISP Warning Lists for false positive reduction
+- **Added:** Top domains filter (132 domains)
+- **Added:** Cloud provider filter (101 CIDRs)
+- **Added:** CDN ranges filter (38 CIDRs)
+- **Added:** Security scanner filter (26 CIDRs)
+- **Added:** Public DNS filter (46 IPs)
 
-### v0.2.0
-- Added: Live active scanning
-- Added: Tech stack detection
-- Added: Endpoint discovery
-- Added: Auto-save findings
+### v0.5.0 - Expanded Payload Library
+- **Added:** 573+ payloads from security research sources
+- **Added:** 37 attack categories
+- **Added:** PayloadsAllTheThings integration
+- **Added:** SecLists patterns integration
+- **Added:** WordMutator class
+- **Added:** Risk level classification
 
-### v0.1.0
-- Initial release
-- Multi-agent architecture
-- Safety gate system
-- Basic CLI interface
+### v0.4.0 - Hypothesis Debate System
+- **Added:** Multi-agent debate with 6 roles
+- **Added:** Auto-verification with baseline comparison
+- **Added:** Token extraction and validation
+- **Added:** False positive filtering
+- **Added:** Verbose logging
+
+### v0.3.0 - Enhanced Scanning
+- **Added:** SSL warning suppression
+- **Added:** SSRF timeout handling
+- **Fixed:** Evidence truncation
+
+### v0.2.0 - Live Scanning
+- **Added:** Live active scanning
+- **Added:** Tech stack detection
+- **Added:** Endpoint discovery
+- **Added:** Auto-save findings
+
+### v0.1.0 - Initial Release
+- **Added:** Multi-agent architecture (5 agents)
+- **Added:** Safety gate system
+- **Added:** Basic CLI interface
 
 ---
 
