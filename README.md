@@ -7,9 +7,297 @@
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange.svg)](#changelog)
 [![License](https://img.shields.io/badge/License-Research-red.svg)](#disclaimer)
 
-**Framework multi-agent untuk zero-day security research dengan live active scanning, WAF bypass, hypothesis debate system, dan auto-verification.**
+**🇮🇩 Framework multi-agent untuk zero-day security research dengan live active scanning, WAF bypass, hypothesis debate system, dan auto-verification.**
+
+**🇬🇧 Multi-agent framework for zero-day security research with live active scanning, WAF bypass, hypothesis debate system, and auto-verification.**
+
+[🇮🇩 Bahasa Indonesia](#-bahasa-indonesia) | [🇬🇧 English](#-english)
 
 </div>
+
+---
+
+# 🇮🇩 Bahasa Indonesia
+
+## 📖 Apa itu Attack Surface?
+
+Attack Surface adalah framework keamanan otomatis yang menggunakan pendekatan **multi-agent** untuk menemukan kerentanan pada aplikasi web. Framework ini meniru cara kerja tim security researcher dengan berbagai peran yang saling berdebat dan memvalidasi temuan.
+
+### Analogi Sederhana
+
+Bayangkan Anda memiliki tim security yang terdiri dari:
+- 🔍 **Scout** - Mencari informasi tentang target
+- 🎯 **Hunter** - Mencoba berbagai serangan
+- ⚔️ **Attacker** - Membuat exploit
+- ✅ **Validator** - Memastikan temuan benar
+- 👿 **Devil's Advocate** - Menantang setiap klaim
+
+Framework ini otomatis melakukan semua itu!
+
+## 🔄 Cara Kerja (Workflow)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    ALUR KERJA ATTACK SURFACE                 │
+└──────────────────────────────────────────────────────────────┘
+
+1️⃣ INPUT
+   User memasukkan: URL target + kata kunci otorisasi
+   Contoh: "Zero-day research https://target.com dengan izin"
+
+2️⃣ OTORISASI
+   ├── ❓ Apa yang dicek? Kata kunci izin ("izin", "authorized", "pentest")
+   ├── ⚙️ Bagaimana? SafetyGate memvalidasi intent user
+   └── ✅ Hasil: IZINKAN / TOLAK
+
+3️⃣ RECONNAISSANCE (Pengintaian)
+   ├── ❓ Apa yang dideteksi?
+   │   • Server: nginx, Apache, IIS
+   │   • Framework: Laravel, Django, Express
+   │   • Bahasa: PHP, Python, Node.js, Java
+   │   • Database: MySQL, PostgreSQL, MongoDB
+   ├── ⚙️ Bagaimana?
+   │   • Analisis HTTP headers
+   │   • Fingerprinting response body
+   │   • Pattern cookie (PHPSESSID, connect.sid)
+   └── ✅ Hasil: TechStack(server="nginx", framework="Laravel", ...)
+
+4️⃣ DETEKSI WAF (Web Application Firewall)
+   ├── ❓ Apa yang dideteksi?
+   │   • Cloudflare, AWS WAF, ModSecurity, Imperva, dll
+   ├── ⚙️ Bagaimana?
+   │   • Kirim payload test: <script>alert(1)</script>
+   │   • Cocokkan dengan 20 signature WAF
+   └── ✅ Hasil: WAFResult(detected=True, name="Cloudflare", bypass=[...])
+
+5️⃣ PENEMUAN ENDPOINT
+   ├── ❓ Apa yang dicari?
+   │   • Admin panel: /admin, /wp-admin
+   │   • API: /api, /v1, /graphql
+   │   • Config: /.env, /config.php
+   ├── ⚙️ Bagaimana? Wordlist 54 path + crawling
+   └── ✅ Hasil: Daftar endpoint dengan parameter
+
+6️⃣ PENGUJIAN KERENTANAN
+   ├── ❓ Apa yang diuji?
+   │   • SQL Injection (50 payload)
+   │   • XSS (38 payload)
+   │   • SSRF, SSTI, LFI, RCE, XXE
+   │   • Total: 37 kategori, 573+ payload
+   ├── ⚙️ Bagaimana?
+   │   • Kirim payload + encoding bypass WAF
+   │   • Bandingkan response dengan baseline
+   │   • Validasi dengan canary/time/math
+   └── ✅ Hasil: Daftar kerentanan potensial
+
+7️⃣ DEBATE (Perdebatan Agent)
+   ├── ❓ Apa yang terjadi?
+   │   • Setiap temuan didebat oleh 5 agent
+   │   • Support vs Refute dengan bukti
+   ├── ⚙️ Bagaimana?
+   │   • Voting berdasarkan evidence
+   │   • Devil's advocate menantang
+   └── ✅ Hasil: Verdict (VERIFIED/NEEDS_MANUAL/FALSE_POSITIVE)
+
+8️⃣ OUTPUT
+   ├── 📄 REPORT.txt - Laporan ringkas
+   ├── 📄 findings.json - Data terstruktur
+   └── 📁 exploits/ - Kode exploit
+```
+
+## 📋 Fitur Utama
+
+| Fitur | Deskripsi |
+|-------|-----------|
+| 🌐 **Live Scanning** | Request HTTP langsung ke target |
+| 🔍 **Auto Recon** | Deteksi teknologi, endpoint, parameter |
+| 🛡️ **WAF Bypass** | 20 WAF + 8 teknik encoding |
+| 🧪 **Debate System** | 5 agent berdebat per temuan |
+| ✅ **Auto Verifikasi** | Filter false positive otomatis |
+| 📊 **Evidence** | Hash SHA256, timeline, CVSS |
+
+## 🚀 Cara Menggunakan
+
+```bash
+# Install
+pip install -e .
+
+# Scan dengan izin
+python -m attack_surface "Zero-day research https://target.com dengan izin tertulis"
+
+# Mode verbose + debate
+python -m attack_surface "Pentest https://target.com authorized" --verbose --debate
+
+# Dengan API server
+python -m attack_surface --api --port 8080
+```
+
+## 📁 Struktur File
+
+```
+src/attack_surface/
+├── 🏗️ FONDASI (Infrastructure)
+│   ├── config.py      # Semua konfigurasi di sini
+│   ├── base.py        # Class dasar & enum
+│   ├── utils.py       # Fungsi-fungsi bantu
+│   └── exceptions.py  # Custom error handling
+│
+├── 🎯 CORE (Inti)
+│   ├── orchestrator.py # Koordinator utama
+│   ├── scanner.py      # Mesin scanning
+│   ├── agents.py       # Definisi agent
+│   └── safety.py       # Gerbang otorisasi
+│
+└── 📦 FITUR
+    ├── oob_server.py   # Testing blind vulnerability
+    ├── rate_limiter.py # Deteksi & bypass rate limit
+    ├── chaining.py     # Chain vulnerability
+    ├── reporter.py     # Generate laporan
+    ├── ai_enhancer.py  # Mutasi payload cerdas
+    └── api_server.py   # REST API & dashboard
+```
+
+---
+
+# 🇬🇧 English
+
+## 📖 What is Attack Surface?
+
+Attack Surface is an automated security framework that uses a **multi-agent** approach to discover vulnerabilities in web applications. This framework mimics how a security research team works with various roles that debate and validate each finding.
+
+### Simple Analogy
+
+Imagine you have a security team consisting of:
+- 🔍 **Scout** - Gathers information about the target
+- 🎯 **Hunter** - Tries various attacks
+- ⚔️ **Attacker** - Creates exploits
+- ✅ **Validator** - Ensures findings are accurate
+- 👿 **Devil's Advocate** - Challenges every claim
+
+This framework automates all of that!
+
+## 🔄 How It Works (Workflow)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    ATTACK SURFACE WORKFLOW                   │
+└──────────────────────────────────────────────────────────────┘
+
+1️⃣ INPUT
+   User provides: Target URL + authorization keyword
+   Example: "Zero-day research https://target.com authorized"
+
+2️⃣ AUTHORIZATION
+   ├── ❓ What's checked? Authorization keywords ("authorized", "pentest")
+   ├── ⚙️ How? SafetyGate validates user intent
+   └── ✅ Result: ALLOW / REFUSE
+
+3️⃣ RECONNAISSANCE
+   ├── ❓ What's detected?
+   │   • Server: nginx, Apache, IIS
+   │   • Framework: Laravel, Django, Express
+   │   • Language: PHP, Python, Node.js, Java
+   │   • Database: MySQL, PostgreSQL, MongoDB
+   ├── ⚙️ How?
+   │   • HTTP headers analysis
+   │   • Response body fingerprinting
+   │   • Cookie patterns (PHPSESSID, connect.sid)
+   └── ✅ Result: TechStack(server="nginx", framework="Laravel", ...)
+
+4️⃣ WAF DETECTION (Web Application Firewall)
+   ├── ❓ What's detected?
+   │   • Cloudflare, AWS WAF, ModSecurity, Imperva, etc.
+   ├── ⚙️ How?
+   │   • Send test payload: <script>alert(1)</script>
+   │   • Match against 20 WAF signatures
+   └── ✅ Result: WAFResult(detected=True, name="Cloudflare", bypass=[...])
+
+5️⃣ ENDPOINT DISCOVERY
+   ├── ❓ What's searched?
+   │   • Admin panels: /admin, /wp-admin
+   │   • APIs: /api, /v1, /graphql
+   │   • Config files: /.env, /config.php
+   ├── ⚙️ How? 54 path wordlist + crawling
+   └── ✅ Result: List of endpoints with parameters
+
+6️⃣ VULNERABILITY TESTING
+   ├── ❓ What's tested?
+   │   • SQL Injection (50 payloads)
+   │   • XSS (38 payloads)
+   │   • SSRF, SSTI, LFI, RCE, XXE
+   │   • Total: 37 categories, 573+ payloads
+   ├── ⚙️ How?
+   │   • Send payloads + WAF bypass encoding
+   │   • Compare response with baseline
+   │   • Validate with canary/time/math
+   └── ✅ Result: List of potential vulnerabilities
+
+7️⃣ DEBATE (Agent Discussion)
+   ├── ❓ What happens?
+   │   • Each finding debated by 5 agents
+   │   • Support vs Refute with evidence
+   ├── ⚙️ How?
+   │   • Voting based on evidence
+   │   • Devil's advocate challenges
+   └── ✅ Result: Verdict (VERIFIED/NEEDS_MANUAL/FALSE_POSITIVE)
+
+8️⃣ OUTPUT
+   ├── 📄 REPORT.txt - Summary report
+   ├── 📄 findings.json - Structured data
+   └── 📁 exploits/ - Exploit code
+```
+
+## 📋 Core Features
+
+| Feature | Description |
+|---------|-------------|
+| 🌐 **Live Scanning** | Direct HTTP requests to target |
+| 🔍 **Auto Recon** | Detect technology, endpoints, parameters |
+| 🛡️ **WAF Bypass** | 20 WAFs + 8 encoding techniques |
+| 🧪 **Debate System** | 5 agents debate per finding |
+| ✅ **Auto Verification** | Automatic false positive filtering |
+| 📊 **Evidence** | SHA256 hash, timeline, CVSS |
+
+## 🚀 How to Use
+
+```bash
+# Install
+pip install -e .
+
+# Scan with authorization
+python -m attack_surface "Zero-day research https://target.com authorized"
+
+# Verbose + debate mode
+python -m attack_surface "Pentest https://target.com authorized" --verbose --debate
+
+# With API server
+python -m attack_surface --api --port 8080
+```
+
+## 📁 File Structure
+
+```
+src/attack_surface/
+├── 🏗️ FOUNDATION (Infrastructure)
+│   ├── config.py      # All configuration here
+│   ├── base.py        # Base classes & enums
+│   ├── utils.py       # Utility functions
+│   └── exceptions.py  # Custom error handling
+│
+├── 🎯 CORE
+│   ├── orchestrator.py # Main coordinator
+│   ├── scanner.py      # Scanning engine
+│   ├── agents.py       # Agent definitions
+│   └── safety.py       # Authorization gate
+│
+└── 📦 FEATURES
+    ├── oob_server.py   # Blind vulnerability testing
+    ├── rate_limiter.py # Rate limit detection & bypass
+    ├── chaining.py     # Vulnerability chaining
+    ├── reporter.py     # Report generation
+    ├── ai_enhancer.py  # Smart payload mutation
+    └── api_server.py   # REST API & dashboard
+```
 
 ---
 
@@ -35,18 +323,18 @@
 ## Features
 
 ### Core Capabilities
-| Feature | Description |
-|---------|-------------|
-| 🌐 **Live Active Scanning** | Real HTTP requests ke target untuk deteksi vulnerability |
-| 🔍 **Automated Reconnaissance** | Identifikasi endpoint, parameter, stack teknologi |
-| 🛡️ **WAF Detection & Bypass** | 20 WAF signatures, 8 encoding techniques |
-| 🧪 **Hypothesis Debate** | 6 agent roles mendebat setiap vulnerability |
-| ✅ **Auto-Verification** | Baseline comparison, token validation, false positive filtering |
-| 🎯 **Smart Test Selection** | Test prioritization berdasarkan detected tech stack |
-| 📊 **Evidence Collection** | SHA256 hash verification, timeline, CVSS scoring |
+| Feature | Description (EN) | Deskripsi (ID) |
+|---------|-----------------|----------------|
+| 🌐 **Live Active Scanning** | Real HTTP requests to target for vulnerability detection | Request HTTP nyata ke target untuk deteksi kerentanan |
+| 🔍 **Automated Reconnaissance** | Identify endpoints, parameters, technology stack | Identifikasi endpoint, parameter, stack teknologi |
+| 🛡️ **WAF Detection & Bypass** | 20 WAF signatures, 8 encoding techniques | 20 signature WAF, 8 teknik encoding |
+| 🧪 **Hypothesis Debate** | 6 agent roles debate each vulnerability | 6 role agent mendebat setiap kerentanan |
+| ✅ **Auto-Verification** | Baseline comparison, token validation, FP filtering | Perbandingan baseline, validasi token, filter FP |
+| 🎯 **Smart Test Selection** | Test prioritization based on detected tech stack | Prioritas test berdasarkan tech stack terdeteksi |
+| 📊 **Evidence Collection** | SHA256 hash verification, timeline, CVSS scoring | Verifikasi hash SHA256, timeline, skor CVSS |
 
 ### NEW: Smart Test Selection (v0.7.0)
-Scanner otomatis memilih test berdasarkan detected tech stack:
+Scanner otomatis memilih test berdasarkan detected tech stack / Scanner automatically selects tests based on detected tech stack:
 
 | Stack Detected | Priority Tests |
 |---------------|----------------|
@@ -488,11 +776,11 @@ graph TD
 
 ---
 
-## Installation
+## Installation / Instalasi
 
-### Requirements
+### Requirements / Persyaratan
 - Python 3.10+
-- `requests` library (untuk HTTP scanning)
+- `requests` library (for HTTP scanning / untuk HTTP scanning)
 
 ### Install
 
@@ -501,45 +789,45 @@ graph TD
 git clone https://github.com/purwocode/AGENTIC.git
 cd "ATTACK SURFACE"
 
-# Install in development mode
+# Install in development mode / Install dalam mode development
 python -m pip install -e .
 
-# Or set PYTHONPATH manually
+# Or set PYTHONPATH manually / Atau atur PYTHONPATH manual
 $env:PYTHONPATH = "src"
 ```
 
 ---
 
-## Usage
+## Usage / Penggunaan
 
-### Basic Commands
+### Basic Commands / Perintah Dasar
 
 ```powershell
-# Live scan dengan authorization
+# Live scan with authorization / Live scan dengan otorisasi
 python -m attack_surface "Zero-day research https://target.com dengan izin tertulis"
 
-# With hypothesis debate (recommended)
+# With hypothesis debate (recommended) / Dengan hypothesis debate (disarankan)
 python -m attack_surface "Security research https://target.com dengan bug bounty" --debate
 
-# Verbose mode for debugging
+# Verbose mode for debugging / Mode verbose untuk debugging
 python -m attack_surface "Test https://api.target.com dengan authorized pentest" --verbose
 
-# Combined options
+# Combined options / Opsi gabungan
 python -m attack_surface "Zero-day research https://target.com dengan izin tertulis" --verbose --debate
 ```
 
-### CLI Options
+### CLI Options / Opsi CLI
 
-| Option | Description |
-|--------|-------------|
-| `--debate` | Enable multi-agent hypothesis debate system |
-| `--verbose` | Show detailed verification output |
-| `--no-save` | Don't save findings to disk |
-| `--output DIR` | Custom output directory |
+| Option | Description (EN) | Deskripsi (ID) |
+|--------|-----------------|----------------|
+| `--debate` | Enable multi-agent hypothesis debate system | Aktifkan sistem debate multi-agent |
+| `--verbose` | Show detailed verification output | Tampilkan output verifikasi detail |
+| `--no-save` | Don't save findings to disk | Jangan simpan temuan ke disk |
+| `--output DIR` | Custom output directory | Direktori output kustom |
 
-### Authorization Keywords (Required)
+### Authorization Keywords (Required) / Kata Kunci Otorisasi (Wajib)
 
-Request **harus** mengandung salah satu keyword:
+Request **must** contain one of these keywords / Request **harus** mengandung salah satu keyword:
 - `izin tertulis` / `dengan izin`
 - `bug bounty`
 - `pentest contract`
@@ -1547,9 +1835,23 @@ tests/test_scanner.py
 
 ---
 
-## Disclaimer
+## Disclaimer / Peringatan
+
+### 🇬🇧 English
 
 ⚠️ **For authorized security research only.**
+
+This tool must only be used against targets with:
+- ✅ Written permission from the system owner
+- ✅ Active bug bounty program
+- ✅ Valid pentest contract
+- ✅ Other official authorization
+
+❌ Unauthorized use is **illegal** and unethical.
+
+### 🇮🇩 Bahasa Indonesia
+
+⚠️ **Hanya untuk penelitian keamanan yang terotorisasi.**
 
 Tool ini hanya boleh digunakan terhadap target dengan:
 - ✅ Izin tertulis dari pemilik sistem
