@@ -54,6 +54,20 @@ except ImportError:
     PayloadMode = None
     create_payload_engine = None
 
+# OOB Server for blind vulnerability detection
+try:
+    from attack_surface.oob_server import (
+        OOBServer,
+        OOBCallback,
+        BlindInjectionDetector,
+        DNSExfiltrationDetector,
+    )
+    HAS_OOB_SERVER = True
+except ImportError:
+    HAS_OOB_SERVER = False
+    OOBServer = None
+    BlindInjectionDetector = None
+
 
 @dataclass
 class HttpResponse:
@@ -1398,7 +1412,12 @@ class ActiveScanner:
         timeout: int = 10, 
         verify_ssl: bool = False, 
         verbose: bool = True,
-        payload_mode: str = "standard"
+        payload_mode: str = "standard",
+        oob_enabled: bool = True,
+        oob_host: str = "0.0.0.0",
+        oob_port: int = 8888,
+        oob_domain: str = None,
+        oob_external_service: str = None,  # "interact.sh" or "burpcollaborator"
     ):
         self.timeout = timeout
         self.verify_ssl = verify_ssl
@@ -1408,6 +1427,15 @@ class ActiveScanner:
         self._protected_endpoints: list[str] = []  # Endpoints requiring auth
         self._filtered_false_positives: list[dict] = []  # Track what was filtered
         self._detected_waf: WAFDetectionResult | None = None  # Detected WAF for bypass payloads
+        
+        # OOB Server configuration
+        self._oob_enabled = oob_enabled and HAS_OOB_SERVER
+        self._oob_server: OOBServer | None = None
+        self._oob_host = oob_host
+        self._oob_port = oob_port
+        self._oob_domain = oob_domain
+        self._oob_external_service = oob_external_service
+        self._blind_detector: BlindInjectionDetector | None = None
         
         # Initialize Dynamic Payload Engine
         self._payload_engine = None
@@ -1451,6 +1479,211 @@ class ActiveScanner:
             }
             self._payload_engine.context.mode = mode_map.get(mode, PayloadMode.STANDARD)
             self._log(f"[Payload Engine] Mode changed to: {mode}")
+    
+    # ========== OOB Server Management ==========
+    
+    def start_oob_server(self) -> bool:
+        """Start the OOB callback server for blind vulnerability detection."""
+        if not self._oob_enabled or not HAS_OOB_SERVER:
+            self._log("[OOB] OOB Server not available")
+            return False
+        
+        if self._oob_server and self._oob_server.is_running:
+            self._log("[OOB] Server already running")
+            return True
+        
+        try:
+            self._oob_server = OOBServer(
+                host=self._oob_host,
+                port=self._oob_port,
+                domain=self._oob_domain,
+                external_service=self._oob_external_service
+            )
+            
+            if self._oob_server.start():
+                self._blind_detector = BlindInjectionDetector(self._oob_server)
+                self._log(f"[OOB] Server started on {self._oob_host}:{self._oob_port}")
+                return True
+            else:
+                self._log("[OOB] Failed to start server")
+                return False
+        except Exception as e:
+            self._log(f"[OOB] Error starting server: {e}")
+            return False
+    
+    def stop_oob_server(self):
+        """Stop the OOB callback server."""
+        if self._oob_server:
+            self._oob_server.stop()
+            self._oob_server = None
+            self._blind_detector = None
+            self._log("[OOB] Server stopped")
+    
+    def get_oob_callback_url(self, token: str) -> str:
+        """Get OOB callback URL for a token."""
+        if self._oob_server:
+            return self._oob_server.get_callback_url(token)
+        return ""
+    
+    def get_oob_domain(self) -> str:
+        """Get OOB domain for DNS-based detection."""
+        if self._oob_server:
+            return self._oob_server.domain
+        if self._oob_external_service == "interact.sh":
+            return "oast.pro"
+        if self._oob_external_service == "burpcollaborator":
+            return "burpcollaborator.net"
+        return self._oob_domain or f"{self._oob_host}:{self._oob_port}"
+    
+    def generate_oob_token(self, vuln_type: str, target_url: str, payload: str = "") -> str:
+        """Generate OOB token for tracking callbacks."""
+        if self._oob_server:
+            return self._oob_server.generate_token(vuln_type, target_url, payload)
+        return ""
+    
+    def check_oob_callback(self, token: str) -> tuple[bool, list]:
+        """Check if OOB callback was received."""
+        if self._oob_server:
+            return self._oob_server.check_callback(token)
+        return False, []
+    
+    def wait_for_oob_callback(self, token: str, timeout: float = 10.0) -> tuple[bool, list]:
+        """Wait for OOB callback with timeout."""
+        if self._oob_server:
+            return self._oob_server.wait_for_callback(token, timeout)
+        return False, []
+    
+    # ========== Blind Vulnerability Testing ==========
+    
+    def get_blind_payloads(self, vuln_type: str) -> list[dict]:
+        """
+        Get blind vulnerability payloads with OOB callbacks.
+        
+        Args:
+            vuln_type: "sqli", "rce", "xxe", "ssrf"
+        
+        Returns:
+            List of payload dicts with 'payload', 'type', and metadata
+        """
+        if not self._blind_detector:
+            return []
+        
+        oob_domain = self.get_oob_domain()
+        
+        if vuln_type == "sqli":
+            return self._blind_detector.get_blind_sqli_payloads(oob_domain)
+        elif vuln_type == "rce":
+            return self._blind_detector.get_blind_rce_payloads(oob_domain)
+        elif vuln_type == "xxe":
+            return self._blind_detector.get_blind_xxe_payloads(oob_domain)
+        else:
+            return []
+    
+    def test_blind_vulnerability(
+        self,
+        endpoint: EndpointInfo,
+        param: str,
+        vuln_type: str,
+        baseline_ms: float = None
+    ) -> list[VulnerabilityResult]:
+        """
+        Test for blind vulnerabilities using time-based and OOB techniques.
+        
+        Args:
+            endpoint: Target endpoint
+            param: Parameter to test
+            vuln_type: Type of vulnerability (sqli, rce, xxe)
+            baseline_ms: Baseline response time in ms
+        
+        Returns:
+            List of confirmed vulnerabilities
+        """
+        results = []
+        payloads = self.get_blind_payloads(vuln_type)
+        
+        if not payloads:
+            return results
+        
+        self._log(f"[Blind] Testing {len(payloads)} {vuln_type.upper()} payloads")
+        
+        for payload_info in payloads:
+            payload = payload_info["payload"]
+            payload_type = payload_info["type"]
+            
+            # Generate OOB token if needed
+            oob_token = None
+            if payload_type == "oob" and self._oob_server:
+                oob_token = self.generate_oob_token(
+                    vuln_type=f"blind_{vuln_type}",
+                    target_url=endpoint.url,
+                    payload=payload
+                )
+                # Replace placeholder domain with actual OOB domain
+                oob_domain = self.get_oob_domain()
+                if "attacker.com" in payload:
+                    payload = payload.replace("attacker.com", oob_domain)
+            
+            # Make request with payload
+            try:
+                import time
+                start_time = time.time()
+                
+                # Build test URL
+                test_url = endpoint.url
+                if endpoint.params:
+                    test_params = {k: payload if k == param else v for k, v in endpoint.params.items()}
+                    test_url = f"{endpoint.url}?{urllib.parse.urlencode(test_params)}"
+                else:
+                    test_url = f"{endpoint.url}?{param}={urllib.parse.quote(payload)}"
+                
+                response = self._make_request(test_url)
+                response_ms = (time.time() - start_time) * 1000
+                
+                # Verify based on type
+                is_vulnerable = False
+                confidence = 0.0
+                evidence = ""
+                
+                if payload_type == "time":
+                    expected_delay = 5000  # 5 seconds
+                    if baseline_ms:
+                        delay = response_ms - baseline_ms
+                        if delay >= expected_delay * 0.8:
+                            is_vulnerable = True
+                            confidence = min(0.95, 0.6 + (delay / expected_delay) * 0.3)
+                            evidence = f"Time delay: {delay:.0f}ms (expected: {expected_delay}ms)"
+                
+                elif payload_type == "oob" and oob_token:
+                    # Wait for callback
+                    verified, callbacks = self.wait_for_oob_callback(oob_token, timeout=10.0)
+                    if verified:
+                        is_vulnerable = True
+                        confidence = 0.95  # OOB is highly reliable
+                        evidence = f"OOB callback received"
+                        if callbacks:
+                            evidence += f" from {callbacks[0].source_ip}"
+                
+                if is_vulnerable:
+                    results.append(VulnerabilityResult(
+                        vuln_type=f"blind_{vuln_type}",
+                        target_url=endpoint.url,
+                        payload=payload,
+                        response=response,
+                        is_vulnerable=True,
+                        confidence=confidence,
+                        evidence=evidence,
+                        cvss_score=8.0 if vuln_type in ["rce", "sqli"] else 6.5,
+                        validation_method=payload_type,
+                    ))
+                    self._log(f"    [!] BLIND {vuln_type.upper()} CONFIRMED: {evidence}")
+                    
+            except Exception as e:
+                if self.verbose:
+                    self._log(f"    [!] Error testing blind {vuln_type}: {e}")
+        
+        return results
+    
+    # ========== End OOB Methods ==========
     
     def _log(self, message: str):
         """Print verbose log."""
@@ -1852,6 +2085,13 @@ class ActiveScanner:
         waf_result = self._detect_waf(target_url)
         self._detected_waf = waf_result  # Store for use in vulnerability tests
         
+        # Phase 1.6: Start OOB Server for blind vulnerability detection
+        oob_started = False
+        if self._oob_enabled:
+            if self.verbose:
+                print("\n[*] Phase 1.6: Starting OOB Callback Server...")
+            oob_started = self.start_oob_server()
+        
         if self.verbose:
             print(f"    Server: {tech_stack.server or 'Unknown'}")
             print(f"    Framework: {tech_stack.framework or 'Unknown'}")
@@ -1861,6 +2101,8 @@ class ActiveScanner:
                 print(f"    WAF: {waf_result.waf_type} (confidence: {waf_result.confidence:.0%})")
             else:
                 print(f"    WAF: Not detected")
+            if oob_started:
+                print(f"    OOB Server: {self._oob_host}:{self._oob_port}")
             print(f"    Endpoints found: {len(endpoints)}")
         
         # Phase 2: Smart Test Selection based on Tech Stack
@@ -1917,6 +2159,16 @@ class ActiveScanner:
                     if len(items) <= 3:
                         for item in items:
                             print(f"      - {item['reason']}")
+            
+            # Report OOB callback statistics
+            if self._oob_server:
+                callback_log = self._oob_server.get_callback_log()
+                if callback_log:
+                    print(f"\n[*] OOB Callbacks received: {len(callback_log)}")
+        
+        # Cleanup: Stop OOB server
+        if self._oob_server:
+            self.stop_oob_server()
         
         return ScanResult(
             target=target_url,
@@ -2043,6 +2295,10 @@ class ActiveScanner:
         if "cors" not in [t for t in priority + secondary]:
             secondary.append("cors")
         
+        # === Blind tests (OOB-based) for thorough/aggressive modes ===
+        if self._oob_enabled and self.payload_mode in ("thorough", "aggressive"):
+            secondary.extend(["blind_sqli", "blind_rce", "blind_xxe"])
+        
         # Remove duplicates while preserving order
         priority = list(dict.fromkeys(priority))
         secondary = list(dict.fromkeys([t for t in secondary if t not in priority]))
@@ -2123,6 +2379,32 @@ class ActiveScanner:
         
         elif test_type == "wordpress":
             results.extend(self._test_wordpress(target_url, endpoints))
+        
+        # Blind vulnerability tests using OOB
+        elif test_type == "blind_sqli":
+            if self._oob_enabled and self._blind_detector:
+                for endpoint in endpoints:
+                    if endpoint.params:
+                        for param in endpoint.params:
+                            results.extend(self.test_blind_vulnerability(
+                                endpoint, param, "sqli"
+                            ))
+        
+        elif test_type == "blind_rce":
+            if self._oob_enabled and self._blind_detector:
+                for endpoint in endpoints:
+                    if endpoint.params:
+                        for param in endpoint.params:
+                            results.extend(self.test_blind_vulnerability(
+                                endpoint, param, "rce"
+                            ))
+        
+        elif test_type == "blind_xxe":
+            if self._oob_enabled and self._blind_detector:
+                for endpoint in endpoints:
+                    results.extend(self.test_blind_vulnerability(
+                        endpoint, "body", "xxe"
+                    ))
         
         else:
             if self.verbose:
