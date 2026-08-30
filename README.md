@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/Tests-75%20passing-brightgreen.svg)](#tests)
-[![Version](https://img.shields.io/badge/Version-0.8.0-orange.svg)](#changelog)
+[![Version](https://img.shields.io/badge/Version-1.0.0-orange.svg)](#changelog)
 [![License](https://img.shields.io/badge/License-Research-red.svg)](#disclaimer)
 
 **Framework multi-agent untuk zero-day security research dengan live active scanning, WAF bypass, hypothesis debate system, dan auto-verification.**
@@ -350,10 +350,45 @@ attack-surface\
 │   │   ├── ProofOfConcept     # PoC with evidence
 │   │   ├── ZeroDayFinding     # Complete finding
 │   │   └── LiveScannerModel   # Model with scan results
-│   └── 📄 safety.py           # Authorization gate
-│       ├── SafetyGate         # Main gate class
-│       ├── SafetyDecision     # ALLOW/REFUSE enum
-│       └── SafetyResult       # Gate result
+│   ├── 📄 safety.py           # Authorization gate
+│   │   ├── SafetyGate         # Main gate class
+│   │   ├── SafetyDecision     # ALLOW/REFUSE enum
+│   │   └── SafetyResult       # Gate result
+│   │
+│   │ # ═══════ NEW MODULES (v0.6.0 - v1.0.0) ═══════
+│   │
+│   ├── 📄 oob_server.py       # v0.6.0 - Out-of-Band testing
+│   │   ├── OOBServer          # HTTP callback server
+│   │   ├── OOBTokenManager    # Token correlation
+│   │   ├── DNSExfiltrationDetector
+│   │   └── BlindInjectionDetector
+│   ├── 📄 rate_limiter.py     # v0.6.0 - Rate limiting
+│   │   ├── RateLimitDetector  # Header-based detection
+│   │   ├── RateLimitEvasion   # 4 evasion strategies
+│   │   └── AdaptiveRateLimiter
+│   ├── 📄 chaining.py         # v0.7.0 - Vulnerability chaining
+│   │   ├── VulnChain          # Attack chain definition
+│   │   ├── VulnChainLibrary   # Pre-built chains
+│   │   ├── ChainExecutor      # Chain execution
+│   │   └── ParallelEndpointTester
+│   ├── 📄 reporter.py         # v0.8.0 - Report generation
+│   │   ├── CVSSCalculator     # CVSS v3.1 scoring
+│   │   ├── HTMLReportGenerator # HTML reports
+│   │   ├── NucleiTemplateGenerator
+│   │   ├── BurpSuiteIntegration
+│   │   └── HackerOneExporter, BugcrowdExporter
+│   ├── 📄 ai_enhancer.py      # v0.9.0 - AI Enhancement
+│   │   ├── PayloadMutator     # 8 mutation types
+│   │   ├── IntelligentFuzzer  # Pattern recognition
+│   │   ├── PatternLearner     # Learning from exploits
+│   │   ├── AttackVectorSuggester
+│   │   └── VulnDescriptionGenerator
+│   └── 📄 api_server.py       # v1.0.0 - API & Dashboard
+│       ├── APIServer          # REST API
+│       ├── Web Dashboard      # Real-time UI
+│       ├── DistributedScanner # Multi-worker
+│       ├── VulnerabilityDatabase
+│       └── ComplianceChecker  # OWASP Top 10
 │
 ├── 📁 tools/                  # Advanced tooling
 │   ├── 📄 payload_library.py  # 573+ payloads from SecLists, etc.
@@ -1125,7 +1160,24 @@ Tool ini hanya boleh digunakan terhadap target dengan:
 
 ## Changelog
 
-### v0.8.0 (Current) - WAF Bypass Integration
+### v1.0.0 (Current) - Production Ready
+- **Added:** REST API server with authentication (`api_server.py`)
+- **Added:** Web UI dashboard with real-time status
+- **Added:** Distributed scanning coordinator (`DistributedScanner`)
+- **Added:** Local vulnerability database (`VulnerabilityDatabase`)
+- **Added:** OWASP Top 10 compliance checking (`ComplianceChecker`)
+- **Added:** Scan job queue with progress tracking
+- **Added:** CORS support for web integrations
+
+### v0.9.0 - AI Enhancement
+- **Added:** Payload mutation engine (`PayloadMutator`) with 8 mutation types
+- **Added:** Intelligent fuzzing with pattern recognition (`IntelligentFuzzer`)
+- **Added:** Success pattern learning (`PatternLearner`)
+- **Added:** Attack vector suggestions (`AttackVectorSuggester`)
+- **Added:** Natural language vulnerability descriptions (`VulnDescriptionGenerator`)
+- **Added:** Context-aware WAF bypass mutations
+
+### v0.8.0 - WAF Bypass Integration
 - **Added:** WAF detection with 20 WAF signatures
 - **Added:** WAF-specific bypass techniques (8 encoding methods)
 - **Added:** `WAFDetector` class with comprehensive signature matching
