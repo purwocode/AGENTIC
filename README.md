@@ -15,6 +15,22 @@ Framework multi-agent untuk zero-day security research dengan **live active scan
 - 🛡️ **False Positive Filtering** - Otomatis filter "200 response yang sebenarnya login page"
 - 📊 **Significance Scoring** - Hitung perubahan response (token baru, user data, length diff)
 
+### NEW: MISP Warning List Integration (v0.6.0)
+Filter false positive menggunakan [MISP Warning Lists](https://github.com/MISP/misp-warninglists):
+- 🌐 **Top Domains** (132) - Google, Microsoft, Amazon, Apple, Meta, etc.
+- ☁️ **Cloud Providers** (101 CIDRs) - AWS, Azure, GCP, DigitalOcean, Linode, Vultr
+- 🚀 **CDN Ranges** (38 CIDRs) - Cloudflare, Akamai, Fastly
+- 🔍 **Security Scanners** (26 CIDRs) - Shodan, Censys, Rapid7, Shadowserver
+- 🔒 **Public DNS** (46 IPs) - Google DNS, Cloudflare, Quad9, OpenDNS
+- 🏠 **Private Networks** (16 CIDRs) - RFC1918, RFC5735, RFC6598
+- 🔗 **Dynamic DNS** (37) - duckdns.org, no-ip.com, dynu.com
+- 🔗 **URL Shorteners** (47) - bit.ly, goo.gl, t.co
+- 📧 **Disposable Email** (35) - guerrillamail, mailinator, tempmail
+- 🏛️ **Security Vendors** (44) - virustotal, kaspersky, crowdstrike
+- 🔬 **Malware Analysis** (22) - any.run, hybrid-analysis, joesandbox
+- 📱 **Link-in-Bio** (18) - linktr.ee, bio.link
+- 🌐 **Captive Portals** (14) - connectivitycheck.gstatic.com, etc.
+
 ### Hypothesis Debate System
 - 🧪 **Multi-Agent Debate** - 6 agent roles mendebat setiap vulnerability
 - 💬 **Support/Refute Mechanism** - Setiap agent memberikan evidence pro/kontra
