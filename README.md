@@ -112,6 +112,12 @@ flowchart TB
         SHELL["reverse_shells.py"]
     end
 
+    subgraph NETWORK["🌐 NETWORK TOOLS"]
+        NMAP["nmap_arsenal.py<br/>200 NSE scripts"]
+        SCANS["SYN, TCP, UDP<br/>Stealth, Vuln, Web"]
+        EVASION["IDS/WAF Evasion<br/>Fragmentation, Decoys"]
+    end
+
     subgraph OUTPUT["📤 OUTPUT"]
         FINDINGS["findings.json"]
         EXPLOITS["exploits/"]
@@ -128,6 +134,9 @@ flowchart TB
     ORCH --> AGENTS
     AGENTS --> DEBATE
     DEBATE --> OUTPUT
+    ORCH --> NMAP
+    NMAP --> SCANS --> EVASION
+    NMAP --> SCANNER
     VERIFY --> VERIFIED
     VERIFY --> FP
 
@@ -139,6 +148,7 @@ flowchart TB
     style OUTPUT fill:#be185d,color:#fff
     style VERIFIED fill:#2d6a4f,color:#fff
     style FP fill:#9d0208,color:#fff
+    style NETWORK fill:#0891b2,color:#fff
 ```
 
 ## Struktur
@@ -153,11 +163,12 @@ src/attack_surface/
   __main__.py      # CLI dengan auto-save findings
 
 tools/                         # Advanced tools
-  payload_library.py           # NEW: 500+ payloads dari SecLists, PayloadsAllTheThings, dll
+  payload_library.py           # 500+ payloads dari SecLists, PayloadsAllTheThings, dll
   payload_generator.py         # Dynamic payload generation dengan encoding
   hypothesis_debate.py         # Multi-agent debate system
   enhanced_scanner.py          # Scanner dengan full debate integration
   reverse_shells.py            # Reverse shell payload generator
+  nmap_arsenal.py              # NEW: 200 NSE scripts, preset scans, evasion techniques
 
 tests/
   test_orchestrator.py
