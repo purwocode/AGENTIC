@@ -689,6 +689,9 @@ class ActiveScanner:
         elif test_type == "mass_assignment":
             results.extend(self._test_mass_assignment(target_url, endpoints))
         
+        elif test_type == "wordpress":
+            results.extend(self._test_wordpress(target_url, endpoints))
+        
         else:
             if self.verbose:
                 print(f"    [!] Test type '{test_type}' not implemented yet")
@@ -2033,5 +2036,278 @@ Content-Type: {content_type}\r
                             return results
                     except:
                         pass
+        
+        return results
+    
+    def _test_wordpress(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for WordPress-specific vulnerabilities."""
+        results = []
+        
+        # ========== 1. WP-JSON API Enumeration ==========
+        wp_api_paths = [
+            "/wp-json/wp/v2/users",           # User enumeration
+            "/wp-json/wp/v2/posts",           # Posts (may reveal drafts)
+            "/wp-json/wp/v2/pages",           # Pages
+            "/wp-json/wp/v2/media",           # Media files
+            "/wp-json/wp/v2/comments",        # Comments
+            "/wp-json/wp/v2/settings",        # Settings (admin only)
+            "/wp-json/oembed/1.0/embed",      # oEmbed info
+            "/?rest_route=/wp/v2/users",      # Alternative route
+        ]
+        
+        for path in wp_api_paths:
+            url = f"{base_url}{path}"
+            resp = self._make_request("GET", url)
+            
+            if resp.status_code == 200:
+                try:
+                    data = json.loads(resp.body)
+                    
+                    # User enumeration
+                    if "users" in path and isinstance(data, list) and len(data) > 0:
+                        usernames = [u.get("slug") or u.get("name") for u in data[:5]]
+                        self._log(f"[+] WP Users enumerated: {usernames}")
+                        results.append(VulnTestResult(
+                            vuln_type="WordPress User Enumeration",
+                            payload=path,
+                            target_url=url,
+                            request_data=url,
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=0.90,
+                            evidence=f"Users found: {', '.join(str(u) for u in usernames)}",
+                            evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                        ))
+                    
+                    # Settings exposed (critical)
+                    elif "settings" in path:
+                        self._log(f"[!] WP Settings API exposed!")
+                        results.append(VulnTestResult(
+                            vuln_type="WordPress Settings API Exposed",
+                            payload=path,
+                            target_url=url,
+                            request_data=url,
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=0.95,
+                            evidence="Settings API accessible without authentication",
+                            evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                        ))
+                except:
+                    pass
+        
+        # ========== 2. Author ID Enumeration ==========
+        for author_id in range(1, 11):
+            url = f"{base_url}/?author={author_id}"
+            resp = self._make_request("GET", url)
+            
+            # Check for redirect to author page or username in response
+            location = resp.headers.get("Location", "")
+            if "/author/" in location:
+                username = location.split("/author/")[-1].rstrip("/")
+                self._log(f"[+] Author {author_id} = {username}")
+                results.append(VulnTestResult(
+                    vuln_type="WordPress Author Enumeration",
+                    payload=f"?author={author_id}",
+                    target_url=url,
+                    request_data=url,
+                    response=resp,
+                    is_vulnerable=True,
+                    confidence=0.85,
+                    evidence=f"Author ID {author_id} -> username: {username}",
+                    evidence_hash=self._hash_evidence(f"{author_id}:{username}")
+                ))
+                break  # Found one, that's enough to confirm vulnerability
+        
+        # ========== 3. XML-RPC Vulnerabilities ==========
+        xmlrpc_url = f"{base_url}/xmlrpc.php"
+        
+        # Check if XML-RPC is enabled
+        resp = self._make_request("POST", xmlrpc_url, 
+            data=b'<?xml version="1.0"?><methodCall><methodName>system.listMethods</methodName></methodCall>',
+            headers={"Content-Type": "text/xml"}
+        )
+        
+        if resp.status_code == 200 and "methodResponse" in resp.body:
+            self._log(f"[+] XML-RPC enabled at {xmlrpc_url}")
+            
+            # Check for dangerous methods
+            dangerous_methods = ["wp.getUsersBlogs", "wp.getUsers", "pingback.ping", "system.multicall"]
+            found_methods = [m for m in dangerous_methods if m in resp.body]
+            
+            if found_methods:
+                results.append(VulnTestResult(
+                    vuln_type="WordPress XML-RPC Enabled",
+                    payload="system.listMethods",
+                    target_url=xmlrpc_url,
+                    request_data="XML-RPC listMethods",
+                    response=resp,
+                    is_vulnerable=True,
+                    confidence=0.85,
+                    evidence=f"Dangerous methods available: {', '.join(found_methods)}",
+                    evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                ))
+            
+            # Test XML-RPC brute force capability (multicall)
+            multicall_payload = '''<?xml version="1.0"?>
+<methodCall>
+    <methodName>system.multicall</methodName>
+    <params><param><value><array><data>
+        <value><struct>
+            <member><name>methodName</name><value><string>wp.getUsersBlogs</string></value></member>
+            <member><name>params</name><value><array><data>
+                <value><string>admin</string></value>
+                <value><string>test123</string></value>
+            </data></array></value></member>
+        </struct></value>
+    </data></array></value></param></params>
+</methodCall>'''
+            
+            resp = self._make_request("POST", xmlrpc_url,
+                data=multicall_payload.encode(),
+                headers={"Content-Type": "text/xml"}
+            )
+            
+            if resp.status_code == 200 and "methodResponse" in resp.body:
+                if "faultCode" not in resp.body or "Incorrect username" in resp.body:
+                    results.append(VulnTestResult(
+                        vuln_type="WordPress XML-RPC Brute Force Possible",
+                        payload="system.multicall",
+                        target_url=xmlrpc_url,
+                        request_data="multicall brute force test",
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.80,
+                        evidence="XML-RPC multicall accepts authentication attempts",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+        
+        # ========== 4. Sensitive File Exposure ==========
+        sensitive_paths = [
+            ("/wp-config.php.bak", "DB_NAME"),
+            ("/wp-config.php~", "DB_NAME"),
+            ("/wp-config.php.old", "DB_NAME"),
+            ("/wp-config.php.save", "DB_NAME"),
+            ("/wp-config.php.swp", "DB_NAME"),
+            ("/.wp-config.php.swp", "DB_NAME"),
+            ("/wp-config.txt", "DB_NAME"),
+            ("/wp-config-sample.php", "DB_NAME"),  # Info disclosure
+            ("/debug.log", "PHP"),
+            ("/wp-content/debug.log", "PHP"),
+            ("/.htaccess", "RewriteEngine"),
+            ("/readme.html", "WordPress"),
+            ("/license.txt", "WordPress"),
+            ("/wp-admin/install.php", "WordPress"),
+            ("/wp-includes/version.php", "wp_version"),
+        ]
+        
+        for path, indicator in sensitive_paths:
+            url = f"{base_url}{path}"
+            resp = self._make_request("GET", url)
+            
+            if resp.status_code == 200 and indicator in resp.body:
+                severity = "CRITICAL" if "DB_NAME" in indicator else "INFO"
+                is_vuln = severity == "CRITICAL"
+                
+                self._log(f"[{'!' if is_vuln else '+'}] Sensitive file found: {path}")
+                results.append(VulnTestResult(
+                    vuln_type=f"WordPress Sensitive File Exposure ({severity})",
+                    payload=path,
+                    target_url=url,
+                    request_data=url,
+                    response=resp,
+                    is_vulnerable=is_vuln,
+                    confidence=0.95 if is_vuln else 0.60,
+                    evidence=f"File accessible: {path}",
+                    evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                ))
+                
+                if is_vuln:  # Found config backup, critical!
+                    return results
+        
+        # ========== 5. Plugin/Theme Enumeration ==========
+        # Common vulnerable plugins
+        vulnerable_plugins = [
+            ("contact-form-7", "CVE-2020-35489"),
+            ("elementor", "CVE-2022-29455"),
+            ("wpforms-lite", "Multiple CVEs"),
+            ("classic-editor", "Info"),
+            ("akismet", "Info"),
+            ("yoast", "Info"),
+            ("jetpack", "CVE-2021-24374"),
+            ("woocommerce", "Multiple CVEs"),
+            ("wp-file-manager", "CVE-2020-25213"),  # Critical RCE
+            ("duplicator", "CVE-2020-11738"),
+            ("easy-wp-smtp", "CVE-2019-19521"),
+            ("revslider", "CVE-2014-9735"),
+            ("gravity-forms", "Multiple CVEs"),
+            ("all-in-one-seo-pack", "CVE-2021-25032"),
+            ("updraftplus", "CVE-2022-0633"),
+            ("wordfence", "Info"),
+            ("sucuri-scanner", "Info"),
+            ("w3-total-cache", "CVE-2021-24436"),
+            ("wp-super-cache", "CVE-2021-24209"),
+            ("better-wp-security", "Info"),
+        ]
+        
+        for plugin, cve_info in vulnerable_plugins[:10]:  # Limit to avoid too many requests
+            # Check plugin directory
+            plugin_url = f"{base_url}/wp-content/plugins/{plugin}/readme.txt"
+            resp = self._make_request("GET", plugin_url)
+            
+            if resp.status_code == 200 and ("===" in resp.body or "Stable tag" in resp.body):
+                # Extract version
+                version = "unknown"
+                for line in resp.body.split("\n"):
+                    if "Stable tag:" in line:
+                        version = line.split(":")[1].strip()
+                        break
+                    elif "Version:" in line:
+                        version = line.split(":")[1].strip()
+                        break
+                
+                self._log(f"[+] Plugin found: {plugin} v{version}")
+                results.append(VulnTestResult(
+                    vuln_type="WordPress Plugin Detected",
+                    payload=plugin,
+                    target_url=plugin_url,
+                    request_data=plugin_url,
+                    response=resp,
+                    is_vulnerable=False,  # Info only, need version check
+                    confidence=0.70,
+                    evidence=f"Plugin: {plugin} v{version} (check: {cve_info})",
+                    evidence_hash=self._hash_evidence(f"{plugin}:{version}")
+                ))
+        
+        # ========== 6. Login Page Vulnerabilities ==========
+        login_url = f"{base_url}/wp-login.php"
+        resp = self._make_request("GET", login_url)
+        
+        if resp.status_code == 200 and "wp-login" in resp.body:
+            # Check for user enumeration via login
+            test_users = ["admin", "administrator", "root", "test"]
+            for user in test_users:
+                resp = self._make_request("POST", login_url, form_data={
+                    "log": user,
+                    "pwd": "wrongpassword123",
+                    "wp-submit": "Log In"
+                })
+                
+                # WordPress gives different errors for valid vs invalid users
+                if "invalid username" not in resp.body.lower() and "unknown username" not in resp.body.lower():
+                    if "incorrect" in resp.body.lower() or "password" in resp.body.lower():
+                        self._log(f"[+] Valid username found: {user}")
+                        results.append(VulnTestResult(
+                            vuln_type="WordPress Username Enumeration via Login",
+                            payload=user,
+                            target_url=login_url,
+                            request_data=f"log={user}&pwd=wrong",
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=0.85,
+                            evidence=f"Username '{user}' exists (different error message)",
+                            evidence_hash=self._hash_evidence(f"{user}:{resp.body[:200]}")
+                        ))
+                        break
         
         return results
