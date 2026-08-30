@@ -326,11 +326,45 @@ attack-surface\
 │
 ├── 📄 pyproject.toml          # Project configuration & dependencies
 ├── 📄 README.md               # This documentation
+├── 📄 CONTRIBUTING.md         # Developer guide & conventions
 ├── 📄 Story.md                # Development journey & detailed process
 │
 ├── 📁 src/attack_surface/     # Main source code
-│   ├── 📄 __init__.py         # Package init, version info
+│   │
+│   │ # ═══════ FOUNDATION (Clean Code Infrastructure) ═══════
+│   │
+│   ├── 📄 __init__.py         # Package exports, convenience imports
 │   ├── 📄 __main__.py         # CLI entry point, argument parsing
+│   ├── 📄 config.py           # Centralized configuration (NEW)
+│   │   ├── ScannerConfig      # Timeout, retries, user-agent
+│   │   ├── WAFConfig          # WAF detection settings
+│   │   ├── PayloadConfig      # Payload limits
+│   │   ├── ReportConfig       # Output settings
+│   │   ├── APIConfig          # Server settings
+│   │   └── Config             # Main config container
+│   ├── 📄 base.py             # Base classes & interfaces (NEW)
+│   │   ├── Severity           # CRITICAL/HIGH/MEDIUM/LOW/INFO
+│   │   ├── VulnType           # SQLI/XSS/SSRF/etc enum
+│   │   ├── Finding            # Standard finding structure
+│   │   ├── Result             # Generic result wrapper
+│   │   ├── BaseScanner        # Abstract scanner interface
+│   │   ├── BaseExporter       # Abstract exporter interface
+│   │   └── LoggingMixin       # Consistent logging
+│   ├── 📄 utils.py            # Shared utilities (NEW)
+│   │   ├── URL utilities      # normalize, parse, build
+│   │   ├── String utilities   # truncate, hash, sanitize
+│   │   ├── Network utilities  # is_private_ip, resolve
+│   │   ├── Data utilities     # deep_merge, safe_get
+│   │   └── Retry decorators   # retry, async_retry
+│   ├── 📄 exceptions.py       # Custom exceptions (NEW)
+│   │   ├── AttackSurfaceError # Base exception
+│   │   ├── ScannerError       # Scanning issues
+│   │   ├── WAFBlockedError    # WAF blocked
+│   │   ├── RateLimitError     # Rate limited
+│   │   └── ValidationError    # Validation failed
+│   │
+│   │ # ═══════ CORE (Main Components) ═══════
+│   │
 │   ├── 📄 orchestrator.py     # Main pipeline, ZeroDayOrchestrator
 │   ├── 📄 scanner.py          # Active scanner (2500+ lines)
 │   │   ├── WAFDetector        # 20 WAF signature detection
@@ -355,7 +389,7 @@ attack-surface\
 │   │   ├── SafetyDecision     # ALLOW/REFUSE enum
 │   │   └── SafetyResult       # Gate result
 │   │
-│   │ # ═══════ NEW MODULES (v0.6.0 - v1.0.0) ═══════
+│   │ # ═══════ FEATURES (v0.6.0 - v1.0.0) ═══════
 │   │
 │   ├── 📄 oob_server.py       # v0.6.0 - Out-of-Band testing
 │   │   ├── OOBServer          # HTTP callback server
