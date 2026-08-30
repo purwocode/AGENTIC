@@ -9,6 +9,27 @@ Framework multi-agent untuk zero-day security research dengan **live active scan
 - 🔍 **Automated Reconnaissance** - Identifikasi endpoint, parameter, stack teknologi
 - 🎯 **Vulnerability Discovery** - 37 attack categories dengan 570+ payload variants
 
+### NEW: Smart Test Selection (v0.7.0)
+Scanner otomatis memilih test berdasarkan detected tech stack:
+
+| Stack Detected | Priority Tests |
+|---------------|----------------|
+| **PHP/Laravel/WordPress** | LFI, RCE, Type Juggling, Deserialization |
+| **Python/Flask/Django** | SSTI (Jinja2), Deserialization |
+| **Node.js/Express** | Prototype Pollution, NoSQL, SSTI |
+| **Java/Tomcat/Struts** | Deserialization, XXE, SSTI, RCE |
+| **.NET/ASP/IIS** | Deserialization, XXE, SQLi |
+| **Ruby/Rails** | SSTI, Deserialization, Mass Assignment |
+| **MongoDB detected** | NoSQL Injection (SQLi skipped) |
+| **MySQL/PostgreSQL** | SQL Injection (NoSQL skipped) |
+| **GraphQL endpoint** | Introspection, Batching DoS |
+| **File upload found** | Extension bypass, Content-Type bypass |
+
+**13 New Test Categories Added:**
+- SSTI, LFI, XXE, RCE, CRLF, Open Redirect, CORS
+- GraphQL, File Upload, Prototype Pollution
+- Deserialization, Type Juggling, Mass Assignment
+
 ### Auto-Verification System
 - ✅ **Baseline Comparison** - Capture response dengan invalid creds, bandingkan dengan payload response
 - 🔑 **Token Validation** - Extract token dan validasi dengan akses protected resource
