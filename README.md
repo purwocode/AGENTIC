@@ -518,6 +518,375 @@ Request **harus** mengandung salah satu keyword:
 
 ## Scan Flow
 
+### 🔄 Alur Kerja Lengkap (Complete Workflow)
+
+Berikut adalah alur kerja lengkap dari input hingga output:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         ATTACK SURFACE FRAMEWORK                            │
+│                           Complete Workflow                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+USER INPUT
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  python -m attack_surface "Zero-day research https://target.com dengan izin"│
+└─────────────────────────────────────────────────────────────────────────────┘
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 0: AUTHORIZATION CHECK                                             ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Deteksi:   Kata kunci otorisasi ("izin", "authorized", "pentest")     ║
+║  ⚙️ Proses:    SafetyGate memvalidasi intent user                          ║
+║  ✅ Hasil:     ALLOW / REFUSE decision                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼ (jika ALLOW)
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 1: RECONNAISSANCE                                                  ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Deteksi:                                                              ║
+║     • Server: nginx, Apache, IIS, etc.                                    ║
+║     • Framework: Laravel, Django, Express, Spring                         ║
+║     • Language: PHP, Python, Node.js, Java, .NET                          ║
+║     • Database: MySQL, PostgreSQL, MongoDB, Redis                         ║
+║     • CMS: WordPress, Drupal, Joomla                                      ║
+║                                                                           ║
+║  ⚙️ Proses:                                                                ║
+║     1. HTTP headers analysis (Server, X-Powered-By)                       ║
+║     2. Response body fingerprinting                                       ║
+║     3. Cookie name patterns (PHPSESSID, connect.sid)                      ║
+║     4. Error message patterns                                             ║
+║                                                                           ║
+║  ✅ Hasil:                                                                 ║
+║     TechStack(server="nginx/1.18", framework="Laravel",                   ║
+║               language="PHP", database="MySQL")                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 1.5: WAF DETECTION                                                 ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Deteksi:                                                              ║
+║     • Cloudflare: cf-ray header, __cfduid cookie                          ║
+║     • AWS WAF: x-amzn-requestid header                                    ║
+║     • ModSecurity: blocked response patterns                              ║
+║     • Imperva: incap_ses cookies                                          ║
+║     • 16 WAF lainnya...                                                   ║
+║                                                                           ║
+║  ⚙️ Proses:                                                                ║
+║     1. Kirim probe payload: <script>alert(1)</script>                     ║
+║     2. Analisis response headers & body                                   ║
+║     3. Match dengan 20 WAF signatures                                     ║
+║     4. Load bypass techniques untuk WAF terdeteksi                        ║
+║                                                                           ║
+║  ✅ Hasil:                                                                 ║
+║     WAFDetectionResult(detected=True, waf_name="Cloudflare",              ║
+║                        bypass_techniques=["unicode", "fullwidth"])        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 2: ENDPOINT DISCOVERY                                              ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Deteksi:                                                              ║
+║     • Admin panels: /admin, /wp-admin, /administrator                     ║
+║     • API endpoints: /api, /v1, /graphql                                  ║
+║     • Auth pages: /login, /register, /forgot-password                     ║
+║     • Config files: /.env, /config.php, /web.config                       ║
+║     • Backup files: /.git, /backup.zip, /db.sql                           ║
+║                                                                           ║
+║  ⚙️ Proses:                                                                ║
+║     1. Wordlist-based discovery (54 paths)                                ║
+║     2. Response code analysis (200, 301, 302, 403)                        ║
+║     3. Parameter extraction dari forms                                    ║
+║     4. Link crawling dari response body                                   ║
+║                                                                           ║
+║  ✅ Hasil:                                                                 ║
+║     endpoints = [                                                         ║
+║       EndpointInfo(path="/login", params=["username","password"]),        ║
+║       EndpointInfo(path="/api/users", params=["id"]),                     ║
+║       EndpointInfo(path="/search", params=["q"]),                         ║
+║     ]                                                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 3: SMART TEST SELECTION                                            ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Input: TechStack + Endpoints                                          ║
+║                                                                           ║
+║  ⚙️ Proses (Contoh PHP/Laravel):                                           ║
+║     IF language == "PHP":                                                 ║
+║        priority_tests = [SQLi, LFI, RCE, Type_Juggling]                   ║
+║     IF framework == "Laravel":                                            ║
+║        add_tests([Deserialization, SSTI])                                 ║
+║     IF database == "MySQL":                                               ║
+║        add_tests([SQLi])                                                  ║
+║        skip_tests([NoSQLi])                                               ║
+║     IF endpoint_has("file=") or endpoint_has("page="):                    ║
+║        prioritize([LFI])                                                  ║
+║                                                                           ║
+║  ✅ Hasil:                                                                 ║
+║     selected_tests = {                                                    ║
+║       "high_priority": ["sqli", "lfi", "ssti"],                           ║
+║       "medium_priority": ["xss", "rce"],                                  ║
+║       "skip": ["nosqli"]                                                  ║
+║     }                                                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 4: BASELINE CAPTURE                                                ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Tujuan: Capture "normal" response untuk perbandingan                  ║
+║                                                                           ║
+║  ⚙️ Proses:                                                                ║
+║     1. Request dengan invalid credentials                                 ║
+║        POST /login {username: "invalid", password: "invalid"}             ║
+║     2. Capture response: status, headers, body_length, body_hash          ║
+║     3. Extract patterns: error messages, form tokens                      ║
+║                                                                           ║
+║  ✅ Hasil:                                                                 ║
+║     baseline = BaselineResponse(                                          ║
+║       status_code=200,                                                    ║
+║       body_length=4523,                                                   ║
+║       body_hash="a1b2c3...",                                              ║
+║       error_pattern="Invalid credentials"                                 ║
+║     )                                                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 5: VULNERABILITY TESTING                                           ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  🔁 Loop untuk setiap endpoint & test type:                               ║
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐  ║
+║  │ TEST: SQL Injection pada /login?username=                           │  ║
+║  ├─────────────────────────────────────────────────────────────────────┤  ║
+║  │ ❓ Payload Original:                                                │  ║
+║  │    ' OR '1'='1                                                      │  ║
+║  │                                                                     │  ║
+║  │ ⚙️ WAF Bypass Encoding (jika Cloudflare terdeteksi):                 │  ║
+║  │    1. Unicode:     \u0027 OR \u00271\u0027=\u00271                   │  ║
+║  │    2. Double URL:  %2527%20OR%20%25271%2527=%25271                   │  ║
+║  │    3. Fullwidth:   ＇ OR ＇1＇=＇1                                   │  ║
+║  │    4. Mixed case:  ' oR '1'='1                                      │  ║
+║  │    ... (15 variasi total)                                           │  ║
+║  │                                                                     │  ║
+║  │ ⚙️ Interactive Validation:                                           │  ║
+║  │    • Canary: INSERT unique_token, check if reflected                │  ║
+║  │    • Time-based: payload with SLEEP(5), measure delay               │  ║
+║  │    • Math-based: 7*7=49, check if evaluated                         │  ║
+║  │                                                                     │  ║
+║  │ ✅ Hasil per payload:                                                │  ║
+║  │    VulnTestResult(                                                  │  ║
+║  │      vulnerable=True,                                               │  ║
+║  │      payload="' OR '1'='1",                                         │  ║
+║  │      evidence="Response contains user data instead of error",       │  ║
+║  │      confidence=0.85,                                               │  ║
+║  │      response_diff="+2000 bytes, different hash"                    │  ║
+║  │    )                                                                │  ║
+║  └─────────────────────────────────────────────────────────────────────┘  ║
+║                                                                           ║
+║  Tests yang dijalankan:                                                   ║
+║  ├── SQL Injection (50 payloads × 15 bypass = 750 requests)              ║
+║  ├── XSS (38 payloads × 15 bypass)                                        ║
+║  ├── SSTI (27 payloads × 15 bypass)                                       ║
+║  ├── LFI (32 payloads × 15 bypass)                                        ║
+║  ├── SSRF (44 payloads × 15 bypass)                                       ║
+║  ├── RCE (33 payloads × 15 bypass)                                        ║
+║  ├── XXE (11 payloads × 15 bypass)                                        ║
+║  └── ... (37 kategori total)                                              ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 6: HYPOTHESIS DEBATE (--debate mode)                               ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Input: Potential vulnerability dari Phase 5                           ║
+║                                                                           ║
+║  ⚙️ Proses:                                                                ║
+║  ┌─────────────────────────────────────────────────────────────────────┐  ║
+║  │ 🔍 ReconAgent:                                                      │  ║
+║  │    "Endpoint accepts user input tanpa sanitization"                 │  ║
+║  │                                                                     │  ║
+║  │ 🎯 VulnHunterAgent:                                                 │  ║
+║  │    "SUPPORT: SQL error message terlihat di response"                │  ║
+║  │    Evidence: "You have an error in your SQL syntax..."              │  ║
+║  │                                                                     │  ║
+║  │ ⚔️ ExploitDevAgent:                                                  │  ║
+║  │    "SUPPORT: Union-based payload berhasil extract data"             │  ║
+║  │    Evidence: "admin:5f4dcc3b5aa765d61d..."                          │  ║
+║  │                                                                     │  ║
+║  │ 👿 DevilsAdvocate:                                                  │  ║
+║  │    "REFUTE: Bisa jadi error message adalah false positive"          │  ║
+║  │    Counter: "Perlu validasi dengan data extraction"                 │  ║
+║  │                                                                     │  ║
+║  │ ✅ PoCValidatorAgent:                                                │  ║
+║  │    "VERIFIED: Data extraction confirmed"                            │  ║
+║  │    PoC: "SELECT username,password FROM users"                       │  ║
+║  │                                                                     │  ║
+║  │ 📊 Voting:                                                          │  ║
+║  │    SUPPORT: 4  |  REFUTE: 1  |  Confidence: 80%                     │  ║
+║  └─────────────────────────────────────────────────────────────────────┘  ║
+║                                                                           ║
+║  ✅ Hasil:                                                                 ║
+║     verdict = "VERIFIED" if confidence >= 70% else "NEEDS_MANUAL"         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 7: FALSE POSITIVE FILTERING                                        ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Input: All detected vulnerabilities                                   ║
+║                                                                           ║
+║  ⚙️ Filter MISP Warning Lists:                                            ║
+║     ├── Top Domains (132): google.com, microsoft.com → SKIP              ║
+║     ├── Cloud Providers: AWS, Azure IPs → FLAG                           ║
+║     ├── Security Vendors: virustotal.com → SKIP                          ║
+║     └── Captive Portals: connectivitycheck → SKIP                        ║
+║                                                                           ║
+║  ⚙️ Baseline Comparison:                                                   ║
+║     IF response == baseline:                                              ║
+║        → FALSE POSITIVE (no actual change)                               ║
+║     IF response similar but status different:                             ║
+║        → NEEDS_MANUAL verification                                       ║
+║                                                                           ║
+║  ✅ Hasil:                                                                 ║
+║     filtered = {                                                          ║
+║       "verified": [vuln1, vuln2],      # High confidence                 ║
+║       "needs_manual": [vuln3],          # Medium confidence              ║
+║       "false_positive": [vuln4, vuln5]  # Filtered out                   ║
+║     }                                                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 8: REPORT GENERATION                                               ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ❓ Input: Verified vulnerabilities + evidence                            ║
+║                                                                           ║
+║  ⚙️ Proses:                                                                ║
+║     1. Calculate CVSS score untuk setiap finding                          ║
+║     2. Generate proof-of-concept code                                     ║
+║     3. Create timeline dengan evidence hashes                             ║
+║     4. Export ke multiple formats                                         ║
+║                                                                           ║
+║  ✅ Output Files (Found/session_YYYYMMDD_HHMMSS/):                         ║
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐  ║
+║  │ 📄 REPORT.txt                                                       │  ║
+║  │ ══════════════════════════════════════════════════════════════════ │  ║
+║  │ Target: https://target.com                                          │  ║
+║  │ Scan Date: 2026-08-30 14:23:45                                      │  ║
+║  │                                                                     │  ║
+║  │ FINDINGS SUMMARY:                                                   │  ║
+║  │ ├── Critical: 1                                                     │  ║
+║  │ ├── High: 2                                                         │  ║
+║  │ ├── Medium: 3                                                       │  ║
+║  │ └── Low: 1                                                          │  ║
+║  │                                                                     │  ║
+║  │ [CRITICAL] SQL Injection - /api/users?id=                           │  ║
+║  │ CVSS: 9.8 (Critical)                                                │  ║
+║  │ Payload: 1 OR 1=1--                                                 │  ║
+║  │ Evidence: Database dump retrieved                                   │  ║
+║  │ PoC: curl "https://target.com/api/users?id=1 OR 1=1--"              │  ║
+║  └─────────────────────────────────────────────────────────────────────┘  ║
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐  ║
+║  │ 📄 findings.json                                                    │  ║
+║  │ {                                                                   │  ║
+║  │   "target": "https://target.com",                                   │  ║
+║  │   "scan_id": "abc123",                                              │  ║
+║  │   "findings": [                                                     │  ║
+║  │     {                                                               │  ║
+║  │       "id": "VULN-001",                                             │  ║
+║  │       "type": "sql_injection",                                      │  ║
+║  │       "severity": "critical",                                       │  ║
+║  │       "cvss": 9.8,                                                  │  ║
+║  │       "endpoint": "/api/users",                                     │  ║
+║  │       "parameter": "id",                                            │  ║
+║  │       "payload": "1 OR 1=1--",                                      │  ║
+║  │       "evidence_hash": "sha256:a1b2c3...",                          │  ║
+║  │       "verified": true,                                             │  ║
+║  │       "confidence": 0.95                                            │  ║
+║  │     }                                                               │  ║
+║  │   ]                                                                 │  ║
+║  │ }                                                                   │  ║
+║  └─────────────────────────────────────────────────────────────────────┘  ║
+║                                                                           ║
+║  ┌─────────────────────────────────────────────────────────────────────┐  ║
+║  │ 📄 exploits/sqli_exploit.py                                         │  ║
+║  │ #!/usr/bin/env python3                                              │  ║
+║  │ import requests                                                     │  ║
+║  │                                                                     │  ║
+║  │ TARGET = "https://target.com/api/users"                             │  ║
+║  │ PAYLOAD = "1 OR 1=1--"                                              │  ║
+║  │                                                                     │  ║
+║  │ response = requests.get(f"{TARGET}?id={PAYLOAD}")                   │  ║
+║  │ print(response.text)                                                │  ║
+║  └─────────────────────────────────────────────────────────────────────┘  ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+    │
+    ▼
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  PHASE 9: OPTIONAL EXPORTS (v0.8.0+)                                      ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  📤 Export Options:                                                       ║
+║                                                                           ║
+║  • HTML Report  → Professional report dengan styling                     ║
+║  • Nuclei YAML  → Templates untuk nuclei scanner                         ║
+║  • Burp XML     → Import ke Burp Suite                                   ║
+║  • HackerOne    → Format untuk H1 submission                             ║
+║  • Bugcrowd     → Format untuk Bugcrowd submission                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+```
+
+### Visual Flow Summary
+
+```mermaid
+flowchart LR
+    subgraph INPUT["📥 INPUT"]
+        A["URL + Auth"]
+    end
+    
+    subgraph DETECT["🔍 DETECT"]
+        B["Tech Stack"]
+        C["WAF"]
+        D["Endpoints"]
+    end
+    
+    subgraph TEST["🎯 TEST"]
+        E["Smart Selection"]
+        F["Payload + Bypass"]
+        G["Validation"]
+    end
+    
+    subgraph VERIFY["✅ VERIFY"]
+        H["Debate"]
+        I["Filter FP"]
+    end
+    
+    subgraph OUTPUT["📤 OUTPUT"]
+        J["Reports"]
+        K["Exploits"]
+        L["JSON"]
+    end
+    
+    INPUT --> DETECT --> TEST --> VERIFY --> OUTPUT
+    
+    style INPUT fill:#1a365d,color:#fff
+    style DETECT fill:#059669,color:#fff
+    style TEST fill:#d97706,color:#fff
+    style VERIFY fill:#7c3aed,color:#fff
+    style OUTPUT fill:#be185d,color:#fff
+```
+
 ### Complete Scan Pipeline
 
 ```mermaid
