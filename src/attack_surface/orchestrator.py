@@ -77,7 +77,12 @@ class ZeroDayOrchestrator:
         self._scan_result = None
         self._debate = None
 
-    def run(self, user_request: str) -> ZeroDayReport:
+    def run(self, user_request: str, verbose: bool = False, enable_debate: bool | None = None) -> ZeroDayReport:
+        # Override debate setting if explicitly provided
+        if enable_debate is not None:
+            self.enable_debate = enable_debate and HAS_DEBATE
+        self.verbose = verbose
+        
         safety = self.safety_gate.evaluate(user_request)
         if safety.decision is SafetyDecision.REFUSE:
             return ZeroDayReport("refused", user_request, (), (), safety.safe_prompt, "blocked")
@@ -95,15 +100,17 @@ class ZeroDayOrchestrator:
         from .scanner import ActiveScanner
         
         print(f"\n[*] Starting active scan on: {target_url}")
+        if self.verbose:
+            print("[*] Verbose mode: ENABLED")
         print("[*] Phase 1: Reconnaissance...")
         
         # Initialize debate system if available
         if self.enable_debate:
-            self._debate = HypothesisDebateSystem(verbose=True)
+            self._debate = HypothesisDebateSystem(verbose=self.verbose)
             print("[*] Hypothesis Debate System: ENABLED")
         
         # Perform active scan
-        scanner = ActiveScanner(timeout=15, verify_ssl=False)
+        scanner = ActiveScanner(timeout=15, verify_ssl=False, verbose=getattr(self, 'verbose', False))
         scan_result = scanner.scan_target(target_url)
         self._scan_result = scan_result
         

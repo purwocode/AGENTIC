@@ -377,9 +377,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Zero-day security research framework.")
     parser.add_argument("request", help="Security research request to evaluate")
     parser.add_argument("--no-save", action="store_true", help="Don't save findings to disk")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed verification output")
+    parser.add_argument("--debate", action="store_true", help="Enable multi-agent hypothesis debate system")
+    parser.add_argument("--output", "-o", type=str, help="Custom output directory")
     args = parser.parse_args()
 
-    report = ZeroDayOrchestrator().run(args.request)
+    # Pass options to orchestrator
+    report = ZeroDayOrchestrator().run(
+        args.request,
+        verbose=args.verbose,
+        enable_debate=args.debate
+    )
     print(report.final)
     
     # Save findings if not refused and not disabled
