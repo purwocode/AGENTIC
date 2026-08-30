@@ -7,7 +7,7 @@ Framework multi-agent untuk zero-day security research dengan **live active scan
 ### Core Scanning
 - 🌐 **Live Active Scanning** - Real HTTP requests ke target untuk deteksi vulnerability
 - 🔍 **Automated Reconnaissance** - Identifikasi endpoint, parameter, stack teknologi
-- 🎯 **Vulnerability Discovery** - 25+ attack categories dengan 500+ payload variants
+- 🎯 **Vulnerability Discovery** - 37 attack categories dengan 570+ payload variants
 
 ### Auto-Verification System
 - ✅ **Baseline Comparison** - Capture response dengan invalid creds, bandingkan dengan payload response
@@ -32,34 +32,41 @@ Sources terintegrasi dari komunitas security:
 - 🔧 **[GENOVEVA](https://github.com/joseaguardia/GENOVEVA)** - 17M+ mutations per word
 - 🔧 **[s0md3v/wl](https://github.com/s0md3v/wl)** - Case style conversion
 
-### Attack Categories (25+)
+### Attack Categories (37)
 | Category | Payloads | Description |
 |----------|----------|-------------|
-| SQL Injection | 40+ | MySQL, PostgreSQL, MSSQL, Oracle, SQLite |
-| NoSQL Injection | 25+ | MongoDB operators, CouchDB, timing attacks |
-| XSS | 35+ | Reflected, DOM, filter bypass, polyglot |
-| SSRF | 30+ | Cloud metadata, protocol smuggling, DNS rebinding |
-| SSTI | 25+ | Jinja2, Twig, Freemarker, Velocity, ERB, Mako |
-| XXE | 15+ | File read, SSRF via XXE, blind OOB, XInclude |
-| LFI/Path Traversal | 30+ | PHP wrappers, log poisoning, filter bypass |
-| RCE/Command Injection | 25+ | Separators, blind, filter bypass, exfil |
-| JWT | 20+ | alg:none, RS256→HS256, claim manipulation |
-| CRLF Injection | 10+ | Header injection, HTTP response splitting |
-| Open Redirect | 15+ | Protocol relative, parser confusion, unicode |
-| LDAP Injection | 10+ | Wildcard, filter bypass, enumeration |
-| XPath Injection | 10+ | Blind extraction, node enumeration |
-| GraphQL | 10+ | Introspection, batching, nested DoS |
-| Prototype Pollution | 10+ | __proto__, constructor, EJS RCE |
-| Deserialization | 10+ | PHP, Python, Java, Ruby, .NET patterns |
-| Type Juggling | 10+ | PHP loose comparison, magic hashes |
-| Mass Assignment | 15+ | Admin, role, permission parameters |
-| File Upload | 25+ | Extension bypass, double ext, null byte |
-| CORS | 10+ | Origin bypass, null origin |
-| Request Smuggling | 10+ | CL.TE, TE.CL, obfuscation |
-| Directory Discovery | 60+ | Admin, config, backup, API, cloud |
-| Prompt Injection | 10+ | AI/LLM jailbreak patterns |
-| Web Cache | 5+ | Cache poisoning, deception |
-| IDOR | 10+ | ID manipulation, UUID guessing |
+| SQL Injection | 50 | MySQL, PostgreSQL, MSSQL, Oracle, SQLite |
+| NoSQL Injection | 23 | MongoDB operators, CouchDB, timing attacks |
+| XSS | 38 | Reflected, DOM, filter bypass, polyglot |
+| SSRF | 44 | Cloud metadata, protocol smuggling, DNS rebinding |
+| SSTI | 27 | Jinja2, Twig, Freemarker, Velocity, ERB, Mako |
+| XXE | 11 | File read, SSRF via XXE, blind OOB, XInclude |
+| LFI/Path Traversal | 32 | PHP wrappers, log poisoning, filter bypass |
+| RCE/Command Injection | 33 | Separators, blind, filter bypass, exfil |
+| JWT | 35 | alg:none, RS256→HS256, claim manipulation |
+| CRLF Injection | 9 | Header injection, HTTP response splitting |
+| Open Redirect | 15 | Protocol relative, parser confusion, unicode |
+| LDAP Injection | 9 | Wildcard, filter bypass, enumeration |
+| XPath Injection | 8 | Blind extraction, node enumeration |
+| GraphQL | 7 | Introspection, batching, nested DoS |
+| Prototype Pollution | 7 | __proto__, constructor, EJS RCE |
+| Deserialization | 7 | PHP, Python, Java, Ruby, .NET patterns |
+| Type Juggling | 9 | PHP loose comparison, magic hashes |
+| Mass Assignment | 16 | Admin, role, permission parameters |
+| File Upload | 27 | Extension bypass, double ext, null byte |
+| CORS | 7 | Origin bypass, null origin |
+| Request Smuggling | 7 | CL.TE, TE.CL, obfuscation |
+| Directory Discovery | 54 | Admin, config, backup, API, cloud |
+| Prompt Injection | 10 | AI/LLM jailbreak patterns |
+| Web Cache | 12 | Cache poisoning, deception |
+| **CSRF** | 7 | Form auto-submit, fetch, XHR |
+| **CSS Injection** | 9 | Attribute selector exfil, @import |
+| **CSV Injection** | 10 | DDE formula execution, data exfil |
+| **SSI** | 10 | Server Side Include exec, file read |
+| **LaTeX Injection** | 10 | write18 RCE, \input file read |
+| **XSLT Injection** | 10 | Java/PHP RCE via XSLT processing |
+| **HTTP Param Pollution** | 10 | Duplicate param override, array injection |
+| **WebSocket** | 10 | WS auth bypass, prototype pollution |
 
 ### Exploit Development
 - ⚔️ **Dynamic Payload Generation** - Generate payload dengan 10+ encoding variants
@@ -163,7 +170,7 @@ src/attack_surface/
   __main__.py      # CLI dengan auto-save findings
 
 tools/                         # Advanced tools
-  payload_library.py           # 500+ payloads dari SecLists, PayloadsAllTheThings, dll
+  payload_library.py           # 573 payloads dari SecLists, PayloadsAllTheThings, dll
   payload_generator.py         # Dynamic payload generation dengan encoding
   hypothesis_debate.py         # Multi-agent debate system
   enhanced_scanner.py          # Scanner dengan full debate integration
