@@ -25,6 +25,17 @@ except ImportError:
     import urllib.request
     import urllib.error
 
+# MISP Warning List Filter for false positive reduction
+try:
+    import sys
+    sys.path.insert(0, str(__file__).rsplit("src", 1)[0] + "tools")
+    from warning_list_filter import MISPWarningListFilter, WarningMatch
+    HAS_WARNING_FILTER = True
+except ImportError:
+    HAS_WARNING_FILTER = False
+    MISPWarningListFilter = None
+    WarningMatch = None
+
 
 @dataclass
 class HttpResponse:
@@ -104,6 +115,14 @@ class ActiveScanner:
         self._baselines: dict[str, BaselineResponse] = {}  # Cache baselines per endpoint
         self._protected_endpoints: list[str] = []  # Endpoints requiring auth
         self._filtered_false_positives: list[dict] = []  # Track what was filtered
+        
+        # Initialize MISP Warning List Filter for false positive reduction
+        if HAS_WARNING_FILTER:
+            self._warning_filter = MISPWarningListFilter()
+            self._log("[FP Filter] MISP Warning List Filter: ENABLED")
+        else:
+            self._warning_filter = None
+        
         if HAS_REQUESTS:
             self.session = requests.Session()
             # Set adapter with lower max retries for faster failure
@@ -118,6 +137,55 @@ class ActiveScanner:
         if self.verbose:
             print(f"    {message}")
     
+    def _check_false_positive(self, indicator: str, indicator_type: str = "auto") -> tuple[bool, str]:
+        """
+        Check if an indicator is a known false positive using MISP Warning Lists.
+        
+        Args:
+            indicator: The indicator to check (IP, domain, URL, hash)
+            indicator_type: Type of indicator ("ip", "domain", "url", "hash", "auto")
+        
+        Returns:
+            Tuple of (is_false_positive, reason)
+        """
+        if not self._warning_filter:
+            return False, ""
+        
+        result = self._warning_filter.check_indicator(indicator, indicator_type)
+        if result.matched and result.confidence >= 0.5:
+            return True, result.description
+        return False, ""
+    
+    def _filter_scan_target(self, target_url: str) -> tuple[bool, str]:
+        """
+        Check if target URL should be skipped (belongs to known benign infrastructure).
+        
+        Returns:
+            Tuple of (should_skip, reason)
+        """
+        if not self._warning_filter:
+            return False, ""
+        
+        # Extract domain from URL
+        try:
+            parsed = urllib.parse.urlparse(target_url)
+            domain = parsed.netloc
+            if ":" in domain:
+                domain = domain.split(":")[0]
+            
+            # Check domain
+            result = self._warning_filter.check_domain(domain)
+            if result.matched and result.confidence >= 0.8:
+                return True, f"Target is known benign infrastructure: {result.description}"
+            
+            # Could also check if domain resolves to cloud/cdn IP
+            # But that requires DNS lookup which we skip for speed
+            
+        except Exception:
+            pass
+        
+        return False, ""
+
     def _capture_baseline(self, endpoint_url: str) -> BaselineResponse:
         """Capture baseline response with invalid credentials for comparison."""
         if endpoint_url in self._baselines:
@@ -343,6 +411,12 @@ class ActiveScanner:
         if not target_url.startswith(('http://', 'https://')):
             target_url = f"https://{target_url}"
         target_url = target_url.rstrip('/')
+        
+        # Check if target is known benign infrastructure (optional warning)
+        is_benign, benign_reason = self._filter_scan_target(target_url)
+        if is_benign and self.verbose:
+            print(f"[!] WARNING: {benign_reason}")
+            print("[!] Scanning known legitimate infrastructure may be against ToS")
         
         # Phase 1: Reconnaissance
         tech_stack = self._detect_tech_stack(target_url)
