@@ -1,0 +1,49 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Scan results - SENSITIVE (contains target IPs, vulnerabilities, evidence)
+Found/
+session_*/
+
+# Personal notes
+note.txt
+notes/
+TODO.txt
+
+# Environment & credentials
+.env
+.env.*
+*.env
+secrets.json
+credentials.json
+config.local.py
+
+# Logs
+*.log
+logs/
+debug/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
