@@ -141,39 +141,83 @@ class AIModuleManager:
         """Check if GitHub Copilot is available via VS Code."""
         status = AIModuleStatus(provider=AIProvider.GITHUB_COPILOT, available=False)
         
-        # Method 1: Check VS Code extension
-        vscode_extensions = Path.home() / ".vscode" / "extensions"
         copilot_found = False
+        copilot_location = ""
         
+        # Method 1: Check VS Code user extensions folder
+        vscode_extensions = Path.home() / ".vscode" / "extensions"
         if vscode_extensions.exists():
             for ext in vscode_extensions.iterdir():
                 if "github.copilot" in ext.name.lower():
                     copilot_found = True
+                    copilot_location = "user-extension"
                     break
         
-        # Method 2: Check environment variable (set by VS Code)
-        if os.environ.get("GITHUB_COPILOT_TOKEN") or os.environ.get("COPILOT_AGENT_TOKEN"):
-            copilot_found = True
+        # Method 2: Check VS Code bundled extensions (newer VS Code versions)
+        if not copilot_found:
+            # Common VS Code installation paths on Windows
+            vscode_paths = [
+                Path.home() / "AppData" / "Local" / "Programs" / "Microsoft VS Code",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Microsoft VS Code",
+                Path("C:/Program Files/Microsoft VS Code"),
+                Path("C:/Program Files (x86)/Microsoft VS Code"),
+            ]
+            
+            for vscode_path in vscode_paths:
+                if vscode_path.exists():
+                    # Search for copilot in bundled extensions
+                    for item in vscode_path.rglob("extensions/copilot"):
+                        if item.is_dir():
+                            copilot_found = True
+                            copilot_location = "bundled"
+                            break
+                    if copilot_found:
+                        break
         
-        # Method 3: Check gh CLI for copilot
-        try:
-            result = subprocess.run(
-                ["gh", "extension", "list"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if "copilot" in result.stdout.lower():
-                copilot_found = True
-        except (subprocess.SubprocessError, FileNotFoundError):
-            pass
+        # Method 3: Check VS Code Server extensions (WSL/Remote)
+        if not copilot_found:
+            vscode_server = Path.home() / ".vscode-server" / "extensions"
+            if vscode_server.exists():
+                for ext in vscode_server.iterdir():
+                    if "github.copilot" in ext.name.lower():
+                        copilot_found = True
+                        copilot_location = "vscode-server"
+                        break
+        
+        # Method 4: Check environment variables (set by VS Code when running)
+        if not copilot_found:
+            copilot_env_vars = [
+                "GITHUB_COPILOT_TOKEN",
+                "COPILOT_AGENT_TOKEN",
+                "VSCODE_GIT_ASKPASS_NODE",  # Indicates VS Code is running
+            ]
+            for var in copilot_env_vars:
+                if os.environ.get(var):
+                    copilot_found = True
+                    copilot_location = "env-detected"
+                    break
+        
+        # Method 5: Check gh CLI for copilot extension
+        if not copilot_found:
+            try:
+                result = subprocess.run(
+                    ["gh", "extension", "list"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if "copilot" in result.stdout.lower():
+                    copilot_found = True
+                    copilot_location = "gh-cli"
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
         
         if copilot_found:
             status.available = True
             status.model = "github-copilot"
-            status.endpoint = "vscode-extension"
+            status.endpoint = copilot_location
         else:
-            status.error = "GitHub Copilot extension not found"
+            status.error = "GitHub Copilot not detected (check VS Code or gh CLI)"
         
         return status
     
