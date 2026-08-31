@@ -101,6 +101,7 @@ class ZeroDayOrchestrator:
         """Run with live active scanning against target."""
         from .scanner import ActiveScanner
         
+        # Banner output
         print(f"\n[*] Starting active scan on: {target_url}")
         if self.verbose:
             print("[*] Verbose mode: ENABLED")
@@ -113,12 +114,20 @@ class ZeroDayOrchestrator:
             print("[*] Hypothesis Debate System: ENABLED")
         
         # Perform active scan with dynamic payloads
+        # Scanner will print engine status via _log when verbose=True
         scanner = ActiveScanner(
             timeout=15, 
             verify_ssl=False, 
-            verbose=getattr(self, 'verbose', False),
+            verbose=True,  # Always show engine status
             payload_mode=self._payload_mode
         )
+        
+        # Show debate modules after scanner initialization
+        if self.enable_debate:
+            print("[*] Debate Start : Perintah")
+            print("    [Module GPT Hypothesis ]")
+            print("    [Module Claude Hypothesis ]")
+        
         scan_result = scanner.scan_target(target_url)
         self._scan_result = scan_result
         

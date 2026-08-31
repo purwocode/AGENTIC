@@ -1048,12 +1048,15 @@ class DynamicPayloadEngine:
     
     def get_stats(self) -> dict:
         """Get generation statistics."""
+        extended_total = sum(len(v) for v in self._extended_payloads.values())
         return {
-            'total_generated': self.generated_count,
+            'total_generated': self.generated_count or extended_total,
             'successful_mutations': len(self._successful_mutations),
             'blocked_patterns': len(self._blocked_patterns),
             'mode': self.context.mode.name,
             'waf_type': self.context.waf_type or 'none',
+            'categories': len(self._extended_payloads),
+            'extended_payloads': extended_total,
         }
 
 
