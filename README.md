@@ -689,6 +689,59 @@ Ketika `--debate` diaktifkan, sistem menjalankan **debate SEBELUM scanning**:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### NEW: AI Modules with Auto-Detection (v1.2.0)
+
+Sistem AI Modules mendukung berbagai provider dengan auto-detection:
+
+| Provider | Tipe | Konfigurasi | Deskripsi |
+|----------|------|-------------|-----------|
+| **Ollama** | Local LLM | Jalankan `ollama serve` | Free, private, mendukung llama3, mistral, dll |
+| **LM Studio** | Local LLM | Jalankan LM Studio server | Local inference dengan berbagai model |
+| **GitHub Copilot** | VS Code | Install extension | Via VS Code atau `gh copilot` CLI |
+| **OpenAI** | Cloud API | `OPENAI_API_KEY` env | GPT-4, GPT-4o-mini |
+| **Anthropic** | Cloud API | `ANTHROPIC_API_KEY` env | Claude 3 Haiku/Sonnet/Opus |
+| **Groq** | Cloud API | `GROQ_API_KEY` env | Fast inference (Llama 70B) |
+
+**Prioritas Auto-Detection:**
+1. GitHub Copilot → 2. Ollama → 3. LM Studio → 4. Groq → 5. OpenAI → 6. Anthropic
+
+**Contoh Output:**
+```
+[AI Modules] Auto-Detection Results:
+    [✓] OLLAMA: model=llama3.2, latency=45ms
+    [✗] LM_STUDIO: Cannot connect to LM Studio
+    [✗] OPENAI: OPENAI_API_KEY not set
+    [✗] ANTHROPIC: ANTHROPIC_API_KEY not set
+    [✓] GROQ: model=llama-3.3-70b-versatile
+[AI Active] Using: OLLAMA
+```
+
+**Setup Ollama (Recommended untuk lokal):**
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Download model
+ollama pull llama3.2
+
+# Jalankan server (auto-detected!)
+ollama serve
+```
+
+**Setup dengan API Key:**
+```bash
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Groq (free tier available)
+export GROQ_API_KEY="gsk_..."
+```
+
+Jika tidak ada AI provider tersedia, sistem menggunakan **template-based patterns** yang sudah terbukti efektif.
+
 ### NEW: WAF Detection & Bypass (v0.8.0)
 Integrasi [waf-checker](https://github.com/SecH0us3/waf-checker) untuk deteksi dan bypass WAF:
 
