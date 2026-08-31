@@ -3,8 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import threading
 from datetime import datetime
+from functools import partial
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .orchestrator import ZeroDayOrchestrator, ZeroDayReport
 from .models import ZeroDayFinding, ExploitPayload, ProofOfConcept
@@ -1241,9 +1246,231 @@ echo "=========================================="
     (exploits_dir / "attack_chain.sh").write_text(attack_chain, encoding="utf-8")
 
 
+# ============================================================================
+# API Server Implementation
+# ============================================================================
+
+class AttackSurfaceAPIHandler(BaseHTTPRequestHandler):
+    """REST API handler for Attack Surface framework."""
+    
+    def __init__(self, *args, orchestrator: ZeroDayOrchestrator = None, **kwargs):
+        self.orchestrator = orchestrator or ZeroDayOrchestrator()
+        super().__init__(*args, **kwargs)
+    
+    def _send_json_response(self, data: dict, status: int = 200) -> None:
+        """Send JSON response."""
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8"))
+    
+    def _send_error_response(self, message: str, status: int = 400) -> None:
+        """Send error response."""
+        self._send_json_response({"error": message, "status": "error"}, status)
+    
+    def do_OPTIONS(self) -> None:
+        """Handle CORS preflight."""
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+    
+    def do_GET(self) -> None:
+        """Handle GET requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+        
+        if path == "/" or path == "/status":
+            self._send_json_response({
+                "status": "running",
+                "name": "Attack Surface Zero-Day Framework",
+                "version": "1.2.0",
+                "endpoints": {
+                    "GET /": "API status and info",
+                    "GET /status": "API status and info",
+                    "POST /scan": "Submit a security scan request",
+                    "GET /help": "API usage documentation"
+                }
+            })
+        elif path == "/help":
+            self._send_json_response({
+                "usage": {
+                    "scan": {
+                        "method": "POST",
+                        "url": "/scan",
+                        "body": {
+                            "request": "(required) Security research request with target URL",
+                            "verbose": "(optional) Show detailed output, default: false",
+                            "debate": "(optional) Enable multi-agent debate, default: false",
+                            "payload_mode": "(optional) quick|standard|thorough|aggressive, default: standard"
+                        },
+                        "example": {
+                            "request": "Zero-day research https://example.com dengan izin tertulis",
+                            "verbose": True,
+                            "debate": True,
+                            "payload_mode": "aggressive"
+                        }
+                    }
+                }
+            })
+        else:
+            self._send_error_response(f"Endpoint not found: {path}", 404)
+    
+    def do_POST(self) -> None:
+        """Handle POST requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+        
+        if path == "/scan":
+            self._handle_scan()
+        else:
+            self._send_error_response(f"Endpoint not found: {path}", 404)
+    
+    def _handle_scan(self) -> None:
+        """Handle /scan endpoint."""
+        try:
+            # Read request body
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length == 0:
+                self._send_error_response("Request body is required")
+                return
+            
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+            
+            # Extract parameters
+            request_text = data.get("request")
+            if not request_text:
+                self._send_error_response("'request' field is required")
+                return
+            
+            verbose = data.get("verbose", False)
+            debate = data.get("debate", False)
+            payload_mode = data.get("payload_mode", "standard")
+            
+            if payload_mode not in ["quick", "standard", "thorough", "aggressive"]:
+                self._send_error_response(
+                    f"Invalid payload_mode: {payload_mode}. "
+                    "Must be: quick, standard, thorough, or aggressive"
+                )
+                return
+            
+            # Run the scan
+            print(f"\n[API] Received scan request:")
+            print(f"      Request: {request_text[:100]}...")
+            print(f"      Mode: {payload_mode}, Verbose: {verbose}, Debate: {debate}")
+            
+            report = self.orchestrator.run(
+                request_text,
+                verbose=verbose,
+                enable_debate=debate,
+                payload_mode=payload_mode
+            )
+            
+            # Build response
+            response = {
+                "status": report.status,
+                "target": report.target,
+                "summary": {
+                    "total_findings": len(report.findings),
+                    "validated": sum(1 for f in report.findings if f.validation_status == "validated"),
+                    "critical": sum(1 for f in report.findings if f.severity == "critical"),
+                    "high": sum(1 for f in report.findings if f.severity == "high"),
+                    "medium": sum(1 for f in report.findings if f.severity == "medium"),
+                    "low": sum(1 for f in report.findings if f.severity == "low"),
+                },
+                "findings": [
+                    {
+                        "id": f.id,
+                        "title": f.title,
+                        "severity": f.severity,
+                        "vulnerability_class": f.vulnerability_class,
+                        "attack_vector": f.attack_vector,
+                        "validation_status": f.validation_status,
+                        "false_positive_checks": list(f.false_positive_checks),
+                        "payloads": [
+                            {
+                                "name": p.name,
+                                "category": p.category,
+                                "payload": p.payload,
+                                "target_component": p.target_component,
+                                "cve_reference": p.cve_reference,
+                                "confidence": p.confidence
+                            }
+                            for p in f.payloads
+                        ]
+                    }
+                    for f in report.findings
+                ],
+                "report": report.final
+            }
+            
+            # Save findings if not refused
+            if report.status != "refused":
+                try:
+                    output_dir = save_findings(report)
+                    response["saved_to"] = str(output_dir)
+                    print(f"[API] Findings saved to: {output_dir}")
+                except Exception as e:
+                    response["save_error"] = str(e)
+            
+            self._send_json_response(response)
+            print(f"[API] Scan completed. Status: {report.status}, Findings: {len(report.findings)}")
+            
+        except json.JSONDecodeError:
+            self._send_error_response("Invalid JSON in request body")
+        except Exception as e:
+            self._send_error_response(f"Scan error: {str(e)}", 500)
+    
+    def log_message(self, format: str, *args) -> None:
+        """Custom log format."""
+        print(f"[API] {self.address_string()} - {format % args}")
+
+
+def run_api_server(port: int = 8080) -> None:
+    """Run the API server."""
+    orchestrator = ZeroDayOrchestrator()
+    handler = partial(AttackSurfaceAPIHandler, orchestrator=orchestrator)
+    
+    server = HTTPServer(("0.0.0.0", port), handler)
+    
+    print(f"""
+╔══════════════════════════════════════════════════════════════════╗
+║       Attack Surface Zero-Day Framework - API Server             ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Status:   RUNNING                                               ║
+║  Port:     {port:<5}                                               ║
+║  URL:      http://localhost:{port}                                 ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Endpoints:                                                      ║
+║    GET  /         - API status                                   ║
+║    GET  /status   - API status                                   ║
+║    GET  /help     - API documentation                            ║
+║    POST /scan     - Submit security scan                         ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Example:                                                        ║
+║    curl -X POST http://localhost:{port}/scan \\                    ║
+║      -H "Content-Type: application/json" \\                       ║
+║      -d '{{"request": "Zero-day research https://target.com"}}'   ║
+╚══════════════════════════════════════════════════════════════════╝
+""")
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[API] Server shutting down...")
+        server.shutdown()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Zero-day security research framework.")
-    parser.add_argument("request", help="Security research request to evaluate")
+    parser.add_argument("request", nargs="?", help="Security research request to evaluate")
+    parser.add_argument("--api", action="store_true", help="Run as REST API server")
+    parser.add_argument("--port", type=int, default=8080, help="API server port (default: 8080)")
     parser.add_argument("--no-save", action="store_true", help="Don't save findings to disk")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed verification output")
     parser.add_argument("--debate", action="store_true", help="Enable multi-agent hypothesis debate system")
@@ -1256,6 +1483,15 @@ def main() -> None:
         help="Payload generation mode: quick (~300), standard (~700), thorough (~3700), aggressive (~5500+ with WAF)"
     )
     args = parser.parse_args()
+
+    # API server mode
+    if args.api:
+        run_api_server(args.port)
+        return
+
+    # CLI mode requires a request
+    if not args.request:
+        parser.error("request is required in CLI mode (or use --api for server mode)")
 
     # Pass options to orchestrator
     report = ZeroDayOrchestrator().run(
