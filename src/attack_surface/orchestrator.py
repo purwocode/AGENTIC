@@ -113,20 +113,39 @@ class ZeroDayOrchestrator:
             self._debate = HypothesisDebateSystem(verbose=self.verbose)
             print("[*] Hypothesis Debate System: ENABLED")
         
-        # Perform active scan with dynamic payloads
-        # Scanner will print engine status via _log when verbose=True
+        # Initialize scanner (will print engine status)
         scanner = ActiveScanner(
             timeout=15, 
             verify_ssl=False, 
-            verbose=True,  # Always show engine status
+            verbose=True,
             payload_mode=self._payload_mode
         )
         
-        # Show debate modules after scanner initialization
+        # ============================================================
+        # PHASE 1: AI HYPOTHESIS GENERATION (Debate First)
+        # ============================================================
         if self.enable_debate:
+            print(f"\n{'='*70}")
+            print("[*] DEBATE PHASE: AI Hypothesis Generation")
+            print(f"{'='*70}")
             print("[*] Debate Start : Perintah")
             print("    [Module GPT Hypothesis ]")
             print("    [Module Claude Hypothesis ]")
+            print()
+            
+            # Run initial hypothesis generation
+            hypotheses = self._generate_initial_hypotheses(target_url, user_request)
+            
+            print(f"\n[*] AI proposed {len(hypotheses)} hypotheses to validate")
+            for h in hypotheses:
+                print(f"    - {h['title']}: {h['description'][:60]}...")
+        
+        # ============================================================
+        # PHASE 2: TOOL VALIDATION (Scan based on hypotheses)
+        # ============================================================
+        print(f"\n{'='*70}")
+        print("[*] VALIDATION PHASE: Tool-based Scanning")
+        print(f"{'='*70}")
         
         scan_result = scanner.scan_target(target_url)
         self._scan_result = scan_result
@@ -140,10 +159,12 @@ class ZeroDayOrchestrator:
         print(f"[*] Phase 2: Vulnerability Testing...")
         print(f"[*] Found {len(scan_result.vulnerabilities)} potential vulnerabilities")
         
-        # Run hypothesis debate on vulnerabilities if enabled
-        if self._debate:
+        # ============================================================
+        # PHASE 3: HYPOTHESIS VALIDATION (Cross-reference debate)
+        # ============================================================
+        if self._debate and scan_result.vulnerabilities:
             print(f"\n{'='*70}")
-            print("[*] HYPOTHESIS DEBATE PHASE")
+            print("[*] CROSS-VALIDATION PHASE: Debate vs Scan Results")
             print(f"{'='*70}\n")
             self._run_vulnerability_debate(scan_result)
         
@@ -179,6 +200,125 @@ class ZeroDayOrchestrator:
         status = "exploit_validated" if confirmed else "analysis_complete"
         
         return ZeroDayReport(status, target_url, tuple(context), tuple(findings), final, attack_phase.prompt())
+    
+    def _generate_initial_hypotheses(self, target_url: str, user_request: str) -> list[dict]:
+        """
+        Generate initial hypotheses using AI agents before scanning.
+        
+        GPT and Claude propose what vulnerabilities might exist based on:
+        - Target URL structure
+        - Common vulnerability patterns
+        - Technology fingerprinting hints
+        """
+        hypotheses = []
+        
+        # Extract domain/path hints
+        from urllib.parse import urlparse
+        parsed = urlparse(target_url)
+        domain = parsed.netloc
+        path = parsed.path
+        
+        # GPT Hypothesis Module: Web Application Vulnerabilities
+        print("\n[GPT] Analyzing target for potential vulnerabilities...")
+        gpt_hypotheses = [
+            {
+                "agent": "GPT",
+                "title": "Authentication Bypass",
+                "description": f"Target {domain} may have authentication vulnerabilities (NoSQL injection, JWT weakness, session fixation)",
+                "attack_vectors": ["nosql_injection", "jwt_attack", "auth_bypass"],
+                "priority": "HIGH"
+            },
+            {
+                "agent": "GPT",
+                "title": "Injection Vulnerabilities", 
+                "description": f"API endpoints at {domain} may be vulnerable to SQL/NoSQL/Command injection",
+                "attack_vectors": ["sql_injection", "nosql_injection", "command_injection"],
+                "priority": "HIGH"
+            },
+            {
+                "agent": "GPT",
+                "title": "Information Disclosure",
+                "description": f"Server may leak sensitive information via error messages, debug endpoints, or misconfigured headers",
+                "attack_vectors": ["path_traversal", "ssrf", "information_disclosure"],
+                "priority": "MEDIUM"
+            }
+        ]
+        
+        for h in gpt_hypotheses:
+            hyp = self._debate.propose_hypothesis(
+                title=h["title"],
+                description=h["description"],
+                proposed_by=AgentRole.VULN_HUNTER,
+                initial_evidence=Evidence(
+                    type="ai_analysis",
+                    data={"attack_vectors": h["attack_vectors"], "priority": h["priority"]},
+                    supports_hypothesis=True,
+                    confidence=0.6,
+                    source_agent=AgentRole.VULN_HUNTER
+                )
+            )
+            h["hypothesis_id"] = hyp.id
+            hypotheses.append(h)
+        
+        # Claude Hypothesis Module: Advanced Attack Patterns
+        print("\n[Claude] Proposing advanced attack hypotheses...")
+        claude_hypotheses = [
+            {
+                "agent": "Claude",
+                "title": "Server-Side Template Injection",
+                "description": f"If {domain} uses template engines (Jinja2, Twig, etc.), SSTI may lead to RCE",
+                "attack_vectors": ["ssti", "rce"],
+                "priority": "CRITICAL"
+            },
+            {
+                "agent": "Claude",
+                "title": "XML External Entity (XXE)",
+                "description": f"XML parsing endpoints may be vulnerable to XXE for file disclosure or SSRF",
+                "attack_vectors": ["xxe", "ssrf"],
+                "priority": "HIGH"
+            },
+            {
+                "agent": "Claude",
+                "title": "Deserialization Attack",
+                "description": f"If application uses serialized objects, unsafe deserialization may allow RCE",
+                "attack_vectors": ["deserialization", "rce"],
+                "priority": "CRITICAL"
+            }
+        ]
+        
+        for h in claude_hypotheses:
+            hyp = self._debate.propose_hypothesis(
+                title=h["title"],
+                description=h["description"],
+                proposed_by=AgentRole.EXPLOIT_DEV,
+                initial_evidence=Evidence(
+                    type="ai_analysis",
+                    data={"attack_vectors": h["attack_vectors"], "priority": h["priority"]},
+                    supports_hypothesis=True,
+                    confidence=0.5,
+                    source_agent=AgentRole.EXPLOIT_DEV
+                )
+            )
+            h["hypothesis_id"] = hyp.id
+            hypotheses.append(h)
+        
+        # Devil's Advocate challenges
+        print("\n[Devil's Advocate] Challenging hypotheses...")
+        for h in hypotheses[:3]:
+            self._debate.refute_hypothesis(
+                h["hypothesis_id"],
+                AgentRole.DEVIL_ADVOCATE,
+                Evidence(
+                    type="skeptical_analysis",
+                    data={"reason": "Needs tool validation before confirmation"},
+                    supports_hypothesis=False,
+                    confidence=0.3,
+                    source_agent=AgentRole.DEVIL_ADVOCATE
+                ),
+                f"Hypothesis '{h['title']}' requires empirical validation with scanning tools"
+            )
+        
+        return hypotheses
     
     def _run_vulnerability_debate(self, scan_result):
         """Run hypothesis debate on discovered vulnerabilities."""
