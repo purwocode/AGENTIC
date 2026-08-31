@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sys
+import asyncio
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -20,6 +21,13 @@ try:
     HAS_DEBATE = True
 except ImportError:
     HAS_DEBATE = False
+
+# AI Modules for dynamic hypothesis generation
+try:
+    from .ai_modules import get_ai_manager, AIProvider
+    HAS_AI_MODULES = True
+except ImportError:
+    HAS_AI_MODULES = False
 
 
 @dataclass(frozen=True)
@@ -124,20 +132,27 @@ class ZeroDayOrchestrator:
         # ============================================================
         # PHASE 1: AI HYPOTHESIS GENERATION (Debate First)
         # ============================================================
+        ai_manager = None
         if self.enable_debate:
             print(f"\n{'='*70}")
             print("[*] DEBATE PHASE: AI Hypothesis Generation")
             print(f"{'='*70}")
             
+            # Auto-detect AI modules
+            if HAS_AI_MODULES:
+                ai_manager = get_ai_manager()
+                ai_manager.detect_available_modules()
+                ai_manager.print_status()
+            
             # Auto-detect request type for debate label
             debate_type = self._detect_request_type(user_request)
-            print(f"[*] Debate Start : {debate_type}")
+            print(f"\n[*] Debate Start : {debate_type}")
             print("    [Module GPT Hypothesis ]")
             print("    [Module Claude Hypothesis ]")
             print()
             
-            # Run initial hypothesis generation
-            hypotheses = self._generate_initial_hypotheses(target_url, user_request)
+            # Run initial hypothesis generation (with real AI if available)
+            hypotheses = self._generate_initial_hypotheses(target_url, user_request, ai_manager)
             
             print(f"\n[*] AI proposed {len(hypotheses)} hypotheses to validate")
             for h in hypotheses:
@@ -253,9 +268,12 @@ class ZeroDayOrchestrator:
         # Default based on language
         return "Perintah" if is_indonesian else "Command"
     
-    def _generate_initial_hypotheses(self, target_url: str, user_request: str) -> list[dict]:
+    def _generate_initial_hypotheses(self, target_url: str, user_request: str, ai_manager=None) -> list[dict]:
         """
         Generate initial hypotheses using AI agents before scanning.
+        
+        If AI modules are available, uses real AI for dynamic analysis.
+        Otherwise falls back to template-based patterns.
         
         GPT and Claude propose what vulnerabilities might exist based on:
         - Target URL structure
@@ -270,31 +288,18 @@ class ZeroDayOrchestrator:
         domain = parsed.netloc
         path = parsed.path
         
+        # Check if real AI is available
+        use_real_ai = ai_manager is not None and ai_manager.get_active_provider() is not None
+        
         # GPT Hypothesis Module: Web Application Vulnerabilities
         print("\n[GPT] Analyzing target for potential vulnerabilities...")
-        gpt_hypotheses = [
-            {
-                "agent": "GPT",
-                "title": "Authentication Bypass",
-                "description": f"Target {domain} may have authentication vulnerabilities (NoSQL injection, JWT weakness, session fixation)",
-                "attack_vectors": ["nosql_injection", "jwt_attack", "auth_bypass"],
-                "priority": "HIGH"
-            },
-            {
-                "agent": "GPT",
-                "title": "Injection Vulnerabilities", 
-                "description": f"API endpoints at {domain} may be vulnerable to SQL/NoSQL/Command injection",
-                "attack_vectors": ["sql_injection", "nosql_injection", "command_injection"],
-                "priority": "HIGH"
-            },
-            {
-                "agent": "GPT",
-                "title": "Information Disclosure",
-                "description": f"Server may leak sensitive information via error messages, debug endpoints, or misconfigured headers",
-                "attack_vectors": ["path_traversal", "ssrf", "information_disclosure"],
-                "priority": "MEDIUM"
-            }
-        ]
+        
+        if use_real_ai:
+            # Use real AI for dynamic hypothesis generation
+            gpt_hypotheses = self._generate_gpt_hypotheses_with_ai(ai_manager, target_url, domain, path)
+        else:
+            # Fallback to template patterns
+            gpt_hypotheses = self._get_gpt_template_hypotheses(domain, path)
         
         for h in gpt_hypotheses:
             hyp = self._debate.propose_hypothesis(
@@ -305,7 +310,7 @@ class ZeroDayOrchestrator:
                     type="ai_analysis",
                     data={"attack_vectors": h["attack_vectors"], "priority": h["priority"]},
                     supports_hypothesis=True,
-                    confidence=0.6,
+                    confidence=0.6 if not use_real_ai else 0.7,
                     source_agent=AgentRole.VULN_HUNTER
                 )
             )
@@ -314,29 +319,11 @@ class ZeroDayOrchestrator:
         
         # Claude Hypothesis Module: Advanced Attack Patterns
         print("\n[Claude] Proposing advanced attack hypotheses...")
-        claude_hypotheses = [
-            {
-                "agent": "Claude",
-                "title": "Server-Side Template Injection",
-                "description": f"If {domain} uses template engines (Jinja2, Twig, etc.), SSTI may lead to RCE",
-                "attack_vectors": ["ssti", "rce"],
-                "priority": "CRITICAL"
-            },
-            {
-                "agent": "Claude",
-                "title": "XML External Entity (XXE)",
-                "description": f"XML parsing endpoints may be vulnerable to XXE for file disclosure or SSRF",
-                "attack_vectors": ["xxe", "ssrf"],
-                "priority": "HIGH"
-            },
-            {
-                "agent": "Claude",
-                "title": "Deserialization Attack",
-                "description": f"If application uses serialized objects, unsafe deserialization may allow RCE",
-                "attack_vectors": ["deserialization", "rce"],
-                "priority": "CRITICAL"
-            }
-        ]
+        
+        if use_real_ai:
+            claude_hypotheses = self._generate_claude_hypotheses_with_ai(ai_manager, target_url, domain, path)
+        else:
+            claude_hypotheses = self._get_claude_template_hypotheses(domain, path)
         
         for h in claude_hypotheses:
             hyp = self._debate.propose_hypothesis(
@@ -347,7 +334,7 @@ class ZeroDayOrchestrator:
                     type="ai_analysis",
                     data={"attack_vectors": h["attack_vectors"], "priority": h["priority"]},
                     supports_hypothesis=True,
-                    confidence=0.5,
+                    confidence=0.5 if not use_real_ai else 0.65,
                     source_agent=AgentRole.EXPLOIT_DEV
                 )
             )
@@ -371,6 +358,168 @@ class ZeroDayOrchestrator:
             )
         
         return hypotheses
+    
+    def _generate_gpt_hypotheses_with_ai(self, ai_manager, target_url: str, domain: str, path: str) -> list[dict]:
+        """Generate GPT-style hypotheses using real AI."""
+        system_prompt = """You are a security researcher analyzing web applications for vulnerabilities.
+        
+Your task is to propose 3 vulnerability hypotheses for a target. For each hypothesis, provide:
+1. A short title (e.g., "SQL Injection")
+2. A description of why this vulnerability might exist
+3. Attack vectors to test (e.g., sqli, xss, ssrf)
+4. Priority (CRITICAL, HIGH, MEDIUM, LOW)
+
+Format your response as JSON array:
+[
+  {"title": "...", "description": "...", "attack_vectors": ["..."], "priority": "HIGH"},
+  ...
+]"""
+        
+        prompt = f"""Analyze this target for potential vulnerabilities:
+        
+Target URL: {target_url}
+Domain: {domain}
+Path: {path}
+
+Consider:
+- Common authentication weaknesses (NoSQL injection, JWT bypass, session fixation)
+- Injection points (SQL, NoSQL, Command injection)
+- Information disclosure (error messages, debug endpoints)
+
+Propose 3 high-priority vulnerability hypotheses to test."""
+
+        try:
+            # Run async in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                response = loop.run_until_complete(
+                    ai_manager.generate(prompt, system_prompt=system_prompt, temperature=0.7)
+                )
+            finally:
+                loop.close()
+            
+            # Parse JSON from response
+            import json
+            # Try to extract JSON array from response
+            start = response.find('[')
+            end = response.rfind(']') + 1
+            if start >= 0 and end > start:
+                hypotheses = json.loads(response[start:end])
+                # Add agent tag
+                for h in hypotheses:
+                    h["agent"] = "GPT"
+                return hypotheses[:3]
+        except Exception as e:
+            print(f"    [!] AI generation failed: {e}, using fallback")
+        
+        # Fallback to templates
+        return self._get_gpt_template_hypotheses(domain, path)
+    
+    def _generate_claude_hypotheses_with_ai(self, ai_manager, target_url: str, domain: str, path: str) -> list[dict]:
+        """Generate Claude-style hypotheses using real AI."""
+        system_prompt = """You are an expert exploit developer analyzing web applications for advanced vulnerabilities.
+
+Your task is to propose 3 advanced attack hypotheses that require deeper analysis. Focus on:
+- Server-side attacks (SSTI, XXE, Deserialization)
+- Logic flaws and race conditions
+- Chain attacks combining multiple vulnerabilities
+
+Format your response as JSON array:
+[
+  {"title": "...", "description": "...", "attack_vectors": ["..."], "priority": "CRITICAL"},
+  ...
+]"""
+        
+        prompt = f"""Analyze this target for advanced attack vectors:
+        
+Target URL: {target_url}
+Domain: {domain}
+Path: {path}
+
+Consider:
+- Template injection if using Jinja2, Twig, Freemarker
+- XML parsing vulnerabilities (XXE)
+- Unsafe deserialization in Java/PHP/.NET
+- Prototype pollution if Node.js
+- Race conditions in multi-step operations
+
+Propose 3 advanced vulnerability hypotheses for deeper testing."""
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                response = loop.run_until_complete(
+                    ai_manager.generate(prompt, system_prompt=system_prompt, temperature=0.7)
+                )
+            finally:
+                loop.close()
+            
+            import json
+            start = response.find('[')
+            end = response.rfind(']') + 1
+            if start >= 0 and end > start:
+                hypotheses = json.loads(response[start:end])
+                for h in hypotheses:
+                    h["agent"] = "Claude"
+                return hypotheses[:3]
+        except Exception as e:
+            print(f"    [!] AI generation failed: {e}, using fallback")
+        
+        return self._get_claude_template_hypotheses(domain, path)
+    
+    def _get_gpt_template_hypotheses(self, domain: str, path: str) -> list[dict]:
+        """Get template-based GPT hypotheses (fallback when AI unavailable)."""
+        return [
+            {
+                "agent": "GPT",
+                "title": "Authentication Bypass",
+                "description": f"Target {domain} may have authentication vulnerabilities (NoSQL injection, JWT weakness, session fixation)",
+                "attack_vectors": ["nosql_injection", "jwt_attack", "auth_bypass"],
+                "priority": "HIGH"
+            },
+            {
+                "agent": "GPT",
+                "title": "Injection Vulnerabilities", 
+                "description": f"API endpoints at {domain} may be vulnerable to SQL/NoSQL/Command injection",
+                "attack_vectors": ["sql_injection", "nosql_injection", "command_injection"],
+                "priority": "HIGH"
+            },
+            {
+                "agent": "GPT",
+                "title": "Information Disclosure",
+                "description": f"Server may leak sensitive information via error messages, debug endpoints, or misconfigured headers",
+                "attack_vectors": ["path_traversal", "ssrf", "information_disclosure"],
+                "priority": "MEDIUM"
+            }
+        ]
+    
+    def _get_claude_template_hypotheses(self, domain: str, path: str) -> list[dict]:
+        """Get template-based Claude hypotheses (fallback when AI unavailable)."""
+        return [
+            {
+                "agent": "Claude",
+                "title": "Server-Side Template Injection",
+                "description": f"If {domain} uses template engines (Jinja2, Twig, etc.), SSTI may lead to RCE",
+                "attack_vectors": ["ssti", "rce"],
+                "priority": "CRITICAL"
+            },
+            {
+                "agent": "Claude",
+                "title": "XML External Entity (XXE)",
+                "description": f"XML parsing endpoints may be vulnerable to XXE for file disclosure or SSRF",
+                "attack_vectors": ["xxe", "ssrf"],
+                "priority": "HIGH"
+            },
+            {
+                "agent": "Claude",
+                "title": "Deserialization Attack",
+                "description": f"If application uses serialized objects, unsafe deserialization may allow RCE",
+                "attack_vectors": ["deserialization", "rce"],
+                "priority": "CRITICAL"
+            }
+        ]
     
     def _run_vulnerability_debate(self, scan_result):
         """Run hypothesis debate on discovered vulnerabilities."""
