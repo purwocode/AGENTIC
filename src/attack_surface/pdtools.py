@@ -107,6 +107,21 @@ class CVEResult:
     references: list[str] = field(default_factory=list)
 
 
+@dataclass
+class VulnxResult:
+    """VulnX CMS vulnerability scan result."""
+    target: str
+    cms: str = ""
+    cms_version: str = ""
+    themes: list[str] = field(default_factory=list)
+    plugins: list[str] = field(default_factory=list)
+    users: list[str] = field(default_factory=list)
+    vulnerabilities: list[dict] = field(default_factory=list)
+    web_info: dict = field(default_factory=dict)
+    dns_info: dict = field(default_factory=dict)
+    raw_output: str = ""
+
+
 class ProjectDiscoveryTools:
     """
     Wrapper for ProjectDiscovery security tools.
@@ -171,6 +186,10 @@ class ProjectDiscoveryTools:
         else:
             pd_dirs.append(Path("/usr/local/bin"))
         
+        # Special handling for vulnx (Python script in subdirectory)
+        if tool_name == "vulnx":
+            return self._get_vulnx_path(pd_dirs)
+        
         # Executable extension on Windows
         exe_ext = ".exe" if os.name == "nt" else ""
         tool_exe = f"{tool_name}{exe_ext}"
@@ -200,6 +219,22 @@ class ProjectDiscoveryTools:
             else:
                 return system_path
         
+        return None
+    
+    def _get_vulnx_path(self, pd_dirs: list[Path]) -> str | None:
+        """Get path to vulnx Python script."""
+        for pd_dir in pd_dirs:
+            try:
+                # vulnx is a Python script in vulnx subdirectory
+                vulnx_script = pd_dir / "vulnx" / "vulnx.py"
+                if vulnx_script.exists():
+                    return str(vulnx_script)
+                # Also check for vulnx.py directly in pd_dir
+                vulnx_direct = pd_dir / "vulnx.py"
+                if vulnx_direct.exists():
+                    return str(vulnx_direct)
+            except (OSError, PermissionError):
+                continue
         return None
     
     def _is_pd_httpx(self, httpx_path: str) -> bool:
@@ -735,76 +770,268 @@ class ProjectDiscoveryTools:
             timeout=timeout
         )
     
-    # ==================== VULNX: CVE Database ====================
+    # ==================== VULNX: CMS Vulnerability Scanner ====================
     
+    def _run_vulnx_command(
+        self,
+        args: list[str],
+        timeout: int | None = None
+    ) -> PDToolResult:
+        """Run vulnx Python script with arguments."""
+        vulnx_path = self.get_tool_path("vulnx")
+        if not vulnx_path:
+            return PDToolResult(
+                tool="vulnx",
+                success=False,
+                output=[],
+                raw_output="",
+                error="vulnx not available"
+            )
+        
+        timeout = timeout or self.timeout
+        vulnx_dir = str(Path(vulnx_path).parent)
+        
+        # Build command to run vulnx via Python
+        cmd = ["python", vulnx_path] + args
+        
+        try:
+            # Set environment for proper encoding
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=vulnx_dir,
+                env=env
+            )
+            
+            return PDToolResult(
+                tool="vulnx",
+                success=result.returncode == 0,
+                output=[],  # vulnx outputs text, not JSON
+                raw_output=result.stdout + result.stderr,
+                error="" if result.returncode == 0 else result.stderr,
+                command=" ".join(cmd)
+            )
+        except subprocess.TimeoutExpired:
+            return PDToolResult(
+                tool="vulnx",
+                success=False,
+                output=[],
+                raw_output="",
+                error=f"Command timed out after {timeout}s",
+                command=" ".join(cmd)
+            )
+        except Exception as e:
+            return PDToolResult(
+                tool="vulnx",
+                success=False,
+                output=[],
+                raw_output="",
+                error=str(e),
+                command=" ".join(cmd)
+            )
+    
+    def _parse_vulnx_output(self, raw_output: str, target: str) -> VulnxResult:
+        """Parse vulnx text output into structured result."""
+        result = VulnxResult(target=target, raw_output=raw_output)
+        
+        # Parse CMS detection
+        cms_match = re.search(r'CMS\s*:\s*(\w+)', raw_output, re.IGNORECASE)
+        if cms_match:
+            cms = cms_match.group(1)
+            if cms.lower() != "uknown":
+                result.cms = cms
+        
+        # Parse CMS version
+        version_match = re.search(r'Version\s*:\s*([\d.]+)', raw_output, re.IGNORECASE)
+        if version_match:
+            result.cms_version = version_match.group(1)
+        
+        # Parse themes
+        themes_section = re.search(r'Themes\s*:\s*\[(.*?)\]', raw_output, re.DOTALL)
+        if themes_section:
+            themes = [t.strip() for t in themes_section.group(1).split(',') if t.strip()]
+            result.themes = themes
+        
+        # Parse plugins
+        plugins_section = re.search(r'Plugins\s*:\s*\[(.*?)\]', raw_output, re.DOTALL)
+        if plugins_section:
+            plugins = [p.strip() for p in plugins_section.group(1).split(',') if p.strip()]
+            result.plugins = plugins
+        
+        # Parse users
+        users_section = re.search(r'Users?\s*:\s*\[(.*?)\]', raw_output, re.DOTALL)
+        if users_section:
+            users = [u.strip() for u in users_section.group(1).split(',') if u.strip()]
+            result.users = users
+        
+        # Parse vulnerabilities/exploits
+        vuln_matches = re.findall(r'\[VULN\]\s*(.*?)(?:\n|$)', raw_output, re.IGNORECASE)
+        for vuln in vuln_matches:
+            result.vulnerabilities.append({"description": vuln.strip()})
+        
+        # Parse exploit results
+        exploit_matches = re.findall(r'\[EXPLOIT\]\s*(.*?)(?:\n|$)', raw_output, re.IGNORECASE)
+        for exploit in exploit_matches:
+            result.vulnerabilities.append({"exploit": exploit.strip()})
+        
+        return result
+    
+    def vulnx_scan(
+        self,
+        url: str,
+        cms_detect: bool = True,
+        exploit: bool = False,
+        web_info: bool = False,
+        domain_info: bool = False,
+        dns_info: bool = False,
+        ports: str | None = None,
+        output_dir: str | None = None,
+        timeout: int | None = None
+    ) -> VulnxResult:
+        """
+        Scan target with VulnX CMS vulnerability scanner.
+        
+        Args:
+            url: Target URL to scan
+            cms_detect: Enable CMS detection and info gathering
+            exploit: Enable vulnerability exploitation
+            web_info: Gather web information
+            domain_info: Gather subdomain information
+            dns_info: Gather DNS information
+            ports: Ports to scan (e.g., "80,443,8080")
+            output_dir: Directory to save output
+            timeout: Custom timeout
+            
+        Returns:
+            VulnxResult with scan findings
+        """
+        if not self.is_tool_available("vulnx"):
+            return VulnxResult(target=url, raw_output="vulnx not available")
+        
+        args = ["-u", url]
+        
+        if cms_detect:
+            args.append("--cms")
+        if exploit:
+            args.append("-e")
+        if web_info:
+            args.append("-w")
+        if domain_info:
+            args.append("-d")
+        if dns_info:
+            args.append("--dns")
+        if ports:
+            args.extend(["-p", ports])
+        if output_dir:
+            args.extend(["-o", output_dir])
+        
+        result = self._run_vulnx_command(args, timeout=timeout)
+        return self._parse_vulnx_output(result.raw_output, url)
+    
+    def vulnx_cms_scan(
+        self,
+        url: str,
+        timeout: int | None = None
+    ) -> VulnxResult:
+        """
+        Quick CMS detection and info gathering.
+        
+        Args:
+            url: Target URL
+            timeout: Custom timeout
+            
+        Returns:
+            VulnxResult with CMS information
+        """
+        return self.vulnx_scan(
+            url=url,
+            cms_detect=True,
+            exploit=False,
+            timeout=timeout
+        )
+    
+    def vulnx_exploit(
+        self,
+        url: str,
+        timeout: int | None = None
+    ) -> VulnxResult:
+        """
+        Scan and exploit CMS vulnerabilities.
+        
+        Args:
+            url: Target URL
+            timeout: Custom timeout
+            
+        Returns:
+            VulnxResult with exploitation findings
+        """
+        return self.vulnx_scan(
+            url=url,
+            cms_detect=True,
+            exploit=True,
+            timeout=timeout
+        )
+    
+    # Keep search_cves and get_cve_details for nuclei template-based CVE searching
     def search_cves(
         self,
-        query: str = "",
-        product: str | None = None,
-        vendor: str | None = None,
-        severity: list[str] | None = None,
-        kev_only: bool = False,
-        has_poc: bool = False,
-        has_template: bool = False,
+        cve_ids: list[str] | None = None,
+        tags: list[str] | None = None,
         limit: int = 50,
         timeout: int | None = None
     ) -> list[CVEResult]:
         """
-        Search CVE database using vulnx.
+        Search for CVE templates using nuclei-templates.
         
         Args:
-            query: Search query
-            product: Filter by product name
-            vendor: Filter by vendor name
-            severity: Filter by severity levels
-            kev_only: Only KEV (Known Exploited Vulnerabilities)
-            has_poc: Only CVEs with proof of concept
-            has_template: Only CVEs with nuclei templates
+            cve_ids: List of CVE IDs to search for
+            tags: Tags to filter templates (e.g., ["cve", "rce"])
             limit: Maximum results
             timeout: Custom timeout
             
         Returns:
-            List of CVE results
+            List of available CVE templates
         """
-        if not self.is_tool_available("vulnx"):
+        if not self.nuclei_templates_path:
             return []
         
-        tool_path = self.get_tool_path("vulnx") or "vulnx"
-        cmd = [tool_path, "search", "--json", "--silent"]
-        
-        if product:
-            cmd.extend(["--product", product])
-        if vendor:
-            cmd.extend(["--vendor", vendor])
-        if severity:
-            cmd.extend(["--severity", ",".join(severity)])
-        if kev_only:
-            cmd.append("--kev")
-        if has_poc:
-            cmd.append("--poc")
-        if has_template:
-            cmd.append("--template")
-        
-        cmd.extend(["--limit", str(limit)])
-        
-        if query:
-            cmd.append(query)
-        
-        result = self._run_command(cmd, "vulnx", timeout=timeout)
-        
         cves = []
-        for item in result.output:
-            cves.append(CVEResult(
-                cve_id=item.get("cve_id", item.get("id", "")),
-                severity=item.get("severity", ""),
-                cvss_score=item.get("cvss_score", item.get("cvss", {}).get("score", 0.0)),
-                description=item.get("description", item.get("title", "")),
-                affected_products=item.get("affected_products", []),
-                is_kev=item.get("is_kev", False),
-                is_poc=item.get("is_poc", item.get("has_poc", False)),
-                is_template=item.get("is_template", item.get("has_nuclei_template", False)),
-                references=item.get("references", [])
-            ))
+        cve_dir = Path(self.nuclei_templates_path) / "http" / "cves"
+        
+        if not cve_dir.exists():
+            cve_dir = Path(self.nuclei_templates_path) / "cves"
+        
+        if not cve_dir.exists():
+            return []
+        
+        try:
+            # Search for CVE templates
+            for year_dir in cve_dir.iterdir():
+                if year_dir.is_dir():
+                    for template_file in year_dir.glob("*.yaml"):
+                        if len(cves) >= limit:
+                            break
+                        
+                        # Extract CVE ID from filename
+                        cve_id = template_file.stem.upper()
+                        if not cve_id.startswith("CVE-"):
+                            continue
+                        
+                        # Filter by specific CVE IDs if provided
+                        if cve_ids and cve_id not in [c.upper() for c in cve_ids]:
+                            continue
+                        
+                        cves.append(CVEResult(
+                            cve_id=cve_id,
+                            is_template=True
+                        ))
+        except Exception:
+            pass
         
         return cves
     
@@ -814,7 +1041,7 @@ class ProjectDiscoveryTools:
         timeout: int | None = None
     ) -> CVEResult | None:
         """
-        Get detailed CVE information.
+        Get CVE template details from nuclei-templates.
         
         Args:
             cve_id: CVE identifier (e.g., CVE-2021-44228)
@@ -823,26 +1050,36 @@ class ProjectDiscoveryTools:
         Returns:
             CVE details or None if not found
         """
-        if not self.is_tool_available("vulnx"):
+        if not self.nuclei_templates_path:
             return None
         
-        tool_path = self.get_tool_path("vulnx") or "vulnx"
-        cmd = [tool_path, "id", cve_id, "--json"]
-        result = self._run_command(cmd, "vulnx", timeout=timeout)
+        cve_id = cve_id.upper()
+        year = cve_id.split("-")[1] if "-" in cve_id else ""
         
-        if result.output:
-            item = result.output[0]
-            return CVEResult(
-                cve_id=item.get("cve_id", cve_id),
-                severity=item.get("severity", ""),
-                cvss_score=item.get("cvss_score", 0.0),
-                description=item.get("description", ""),
-                affected_products=item.get("affected_products", []),
-                is_kev=item.get("is_kev", False),
-                is_poc=item.get("is_poc", False),
-                is_template=item.get("is_template", False),
-                references=item.get("references", [])
-            )
+        # Search in possible locations
+        possible_paths = [
+            Path(self.nuclei_templates_path) / "http" / "cves" / year / f"{cve_id.lower()}.yaml",
+            Path(self.nuclei_templates_path) / "cves" / year / f"{cve_id.lower()}.yaml",
+        ]
+        
+        for path in possible_paths:
+            if path.exists():
+                try:
+                    import yaml
+                    with open(path, 'r') as f:
+                        template = yaml.safe_load(f)
+                    
+                    info = template.get("info", {})
+                    return CVEResult(
+                        cve_id=cve_id,
+                        severity=info.get("severity", ""),
+                        description=info.get("description", info.get("name", "")),
+                        references=info.get("reference", []),
+                        is_template=True
+                    )
+                except Exception:
+                    pass
+        
         return None
     
     # ==================== COMBINED WORKFLOWS ====================

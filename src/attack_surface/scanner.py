@@ -2030,39 +2030,89 @@ class ActiveScanner:
     
     def pd_search_cves(
         self,
-        query: str = "",
-        product: str | None = None,
-        severity: list[str] | None = None,
-        kev_only: bool = False,
-        has_poc: bool = False
+        cve_ids: list[str] | None = None,
+        tags: list[str] | None = None,
+        limit: int = 50
     ) -> list:
         """
-        Search CVE database using vulnx.
+        Search for CVE templates in nuclei-templates.
         
         Args:
-            query: Search query
-            product: Filter by product name
-            severity: Filter by severity levels
-            kev_only: Only KEV (Known Exploited Vulnerabilities)
-            has_poc: Only CVEs with proof of concept
+            cve_ids: Specific CVE IDs to search for
+            tags: Tags to filter templates
+            limit: Maximum results
             
         Returns:
             List of CVEResult objects
         """
-        if not self._pd_tools or not self._pd_tools.is_tool_available("vulnx"):
-            self._log("[PD Tools] vulnx not available")
+        if not self._pd_tools or not self._pd_tools.nuclei_templates_path:
+            self._log("[PD Tools] nuclei-templates not available")
             return []
         
-        self._log(f"[PD Tools] Searching CVE database...")
+        self._log(f"[PD Tools] Searching CVE templates...")
         results = self._pd_tools.search_cves(
-            query=query,
-            product=product,
-            severity=severity,
-            kev_only=kev_only,
-            has_poc=has_poc
+            cve_ids=cve_ids,
+            tags=tags,
+            limit=limit
         )
-        self._log(f"[PD Tools] Found {len(results)} CVEs")
+        self._log(f"[PD Tools] Found {len(results)} CVE templates")
         return results
+    
+    def pd_vulnx_scan(
+        self,
+        url: str,
+        cms_detect: bool = True,
+        exploit: bool = False,
+        web_info: bool = False,
+        dns_info: bool = False
+    ):
+        """
+        Scan target with VulnX CMS vulnerability scanner.
+        
+        Args:
+            url: Target URL to scan
+            cms_detect: Enable CMS detection
+            exploit: Enable vulnerability exploitation
+            web_info: Gather web information
+            dns_info: Gather DNS information
+            
+        Returns:
+            VulnxResult with scan findings
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("vulnx"):
+            self._log("[PD Tools] vulnx not available")
+            return None
+        
+        self._log(f"[PD Tools] Running VulnX scan on {url}...")
+        result = self._pd_tools.vulnx_scan(
+            url=url,
+            cms_detect=cms_detect,
+            exploit=exploit,
+            web_info=web_info,
+            dns_info=dns_info
+        )
+        if result.cms:
+            self._log(f"[PD Tools] Detected CMS: {result.cms}")
+        if result.vulnerabilities:
+            self._log(f"[PD Tools] Found {len(result.vulnerabilities)} vulnerabilities")
+        return result
+    
+    def pd_vulnx_exploit(self, url: str):
+        """
+        Scan and exploit CMS vulnerabilities.
+        
+        Args:
+            url: Target URL
+            
+        Returns:
+            VulnxResult with exploitation findings
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("vulnx"):
+            self._log("[PD Tools] vulnx not available")
+            return None
+        
+        self._log(f"[PD Tools] Running VulnX exploit scan on {url}...")
+        return self._pd_tools.vulnx_exploit(url=url)
     
     def pd_full_recon(
         self,
