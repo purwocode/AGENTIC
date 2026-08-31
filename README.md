@@ -3,8 +3,8 @@
 <div align="center">
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-75%20passing-brightgreen.svg)](#tests)
-[![Version](https://img.shields.io/badge/Version-1.1.0-orange.svg)](#changelog)
+[![Tests](https://img.shields.io/badge/Tests-101%20passing-brightgreen.svg)](#tests)
+[![Version](https://img.shields.io/badge/Version-1.2.0-orange.svg)](#changelog)
 [![License](https://img.shields.io/badge/License-Research-red.svg)](#disclaimer)
 
 **🇮🇩 Framework multi-agent untuk zero-day security research dengan live active scanning, WAF bypass, hypothesis debate system, dan auto-verification.**
@@ -147,6 +147,54 @@ python -m attack_surface --api --port 8080
 | `thorough` | ~3,700 | Pentest menyeluruh |
 | `aggressive` | ~5,500+ | Bypass WAF, full coverage |
 
+### 🔧 ProjectDiscovery Tools Integration
+
+Attack Surface terintegrasi dengan tools dari [ProjectDiscovery](https://projectdiscovery.io/):
+
+| Tool | Fungsi | Install |
+|------|--------|---------|
+| **nuclei** | Template-based vuln scanner | `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest` |
+| **subfinder** | Subdomain discovery | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` |
+| **httpx** | HTTP probing toolkit | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` |
+| **katana** | Web crawler/spider | `go install github.com/projectdiscovery/katana/cmd/katana@latest` |
+| **naabu** | Fast port scanner | `go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest` |
+| **vulnx** | CVE database explorer | `go install github.com/projectdiscovery/vulnx/v2/cmd/vulnx@latest` |
+
+```python
+from attack_surface.scanner import ActiveScanner
+
+scanner = ActiveScanner(pd_tools_enabled=True)
+
+# Check available tools
+print(scanner.get_pd_tools_status())
+# {'enabled': True, 'tools': {'nuclei': True, 'subfinder': True, ...}}
+
+# Subdomain discovery
+subdomains = scanner.pd_discover_subdomains("example.com")
+
+# Port scanning
+ports = scanner.pd_scan_ports(["192.168.1.1"], ports="top-100")
+
+# HTTP probing with tech detection
+http_services = scanner.pd_probe_http(["https://example.com"])
+
+# Web crawling
+urls = scanner.pd_crawl(["https://example.com"], depth=3)
+
+# Vulnerability scanning with nuclei
+vulns = scanner.pd_scan_vulnerabilities(
+    ["https://example.com"],
+    severity=["critical", "high"],
+    template_tags=["cve", "sqli"]
+)
+
+# Full recon pipeline (subfinder → naabu → httpx → katana)
+recon = scanner.pd_full_recon("example.com")
+
+# Full vuln scan pipeline (httpx → katana → nuclei)
+results = scanner.pd_vuln_scan_pipeline(["https://example.com"])
+```
+
 ## 📁 Struktur File
 
 ```
@@ -169,7 +217,8 @@ src/attack_surface/
     ├── chaining.py     # Chain vulnerability
     ├── reporter.py     # Generate laporan
     ├── ai_enhancer.py  # Mutasi payload cerdas
-    └── api_server.py   # REST API & dashboard
+    ├── api_server.py   # REST API & dashboard
+    └── pdtools.py      # ProjectDiscovery integration
 ```
 
 ---
@@ -289,7 +338,7 @@ python -m attack_surface "Pentest https://target.com authorized" --verbose --deb
 python -m attack_surface "Pentest https://target.com authorized" --payload-mode quick
 
 # Aggressive scan with WAF bypass (aggressive: ~5500 payloads)
-python -m attack_surface "Pentest https://target.com authorized" --payload-mode aggressive
+python -m attack_surface "Pentest https://target.com authorized" --payload-mode aggressive  --api --port 8080
 
 # With API server
 python -m attack_surface --api --port 8080
@@ -303,6 +352,34 @@ python -m attack_surface --api --port 8080
 | `standard` | ~700 | Daily standard scan |
 | `thorough` | ~3,700 | Comprehensive pentest |
 | `aggressive` | ~5,500+ | WAF bypass, full coverage |
+
+### 🔧 ProjectDiscovery Tools Integration
+
+Attack Surface integrates with [ProjectDiscovery](https://projectdiscovery.io/) tools:
+
+| Tool | Function | Install |
+|------|----------|---------|
+| **nuclei** | Template-based vuln scanner | `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest` |
+| **subfinder** | Subdomain discovery | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` |
+| **httpx** | HTTP probing toolkit | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` |
+| **katana** | Web crawler/spider | `go install github.com/projectdiscovery/katana/cmd/katana@latest` |
+| **naabu** | Fast port scanner | `go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest` |
+| **vulnx** | CVE database explorer | `go install github.com/projectdiscovery/vulnx/v2/cmd/vulnx@latest` |
+
+```python
+from attack_surface.scanner import ActiveScanner
+
+scanner = ActiveScanner(pd_tools_enabled=True)
+
+# Check available tools
+print(scanner.get_pd_tools_status())
+
+# Full recon pipeline (subfinder → naabu → httpx → katana)
+recon = scanner.pd_full_recon("example.com")
+
+# Full vuln scan pipeline (httpx → katana → nuclei)
+results = scanner.pd_vuln_scan_pipeline(["https://example.com"])
+```
 
 ## 📁 File Structure
 
@@ -326,7 +403,8 @@ src/attack_surface/
     ├── chaining.py     # Vulnerability chaining
     ├── reporter.py     # Report generation
     ├── ai_enhancer.py  # Smart payload mutation
-    └── api_server.py   # REST API & dashboard
+    ├── api_server.py   # REST API & dashboard
+    └── pdtools.py      # ProjectDiscovery integration
 ```
 
 ---
@@ -1895,7 +1973,21 @@ Tool ini hanya boleh digunakan terhadap target dengan:
 
 ## Changelog
 
-### v1.1.0 (Current) - Dynamic Payload Engine
+### v1.2.0 (Current) - ProjectDiscovery Tools Integration
+- **Added:** `pdtools.py` - Full integration with ProjectDiscovery security tools
+- **Added:** Wrapper for **nuclei** - Template-based vulnerability scanner
+- **Added:** Wrapper for **subfinder** - Subdomain discovery
+- **Added:** Wrapper for **httpx** - HTTP probing toolkit
+- **Added:** Wrapper for **katana** - Web crawler/spider with JS parsing
+- **Added:** Wrapper for **naabu** - Fast port scanner
+- **Added:** Wrapper for **vulnx** - CVE database exploration
+- **Added:** `pd_full_recon()` - Combined recon pipeline (subfinder → naabu → httpx → katana)
+- **Added:** `pd_vuln_scan_pipeline()` - Vulnerability pipeline (httpx → katana → nuclei)
+- **Added:** Auto-detection of installed PD tools
+- **Added:** Rate limiting and thread control for PD tools
+- **Improved:** Test coverage now 101 tests
+
+### v1.1.0 - Dynamic Payload Engine
 - **Added:** `dynamic_payloads.py` - Full dynamic payload generation engine
 - **Added:** `PayloadMode` enum with 4 modes (QUICK, STANDARD, THOROUGH, AGGRESSIVE)
 - **Added:** `EncodingEngine` with 14 encoding types (url, unicode, html, hex, base64, etc.)

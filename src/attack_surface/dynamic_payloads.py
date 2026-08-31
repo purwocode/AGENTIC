@@ -17,14 +17,29 @@ import itertools
 import logging
 import random
 import re
+import sys
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
+from pathlib import Path
 from typing import Any, Callable, Generator, Iterator, Optional
 
 logger = logging.getLogger(__name__)
+
+# Import PayloadLibrary from tools for extended payloads
+try:
+    # Add tools path
+    tools_path = Path(__file__).parent.parent.parent / "tools"
+    if tools_path.exists():
+        sys.path.insert(0, str(tools_path))
+    from payload_library import PayloadLibrary, PayloadCategory, EnhancedPayload
+    HAS_PAYLOAD_LIBRARY = True
+except ImportError:
+    HAS_PAYLOAD_LIBRARY = False
+    PayloadLibrary = None
+    PayloadCategory = None
 
 
 class PayloadMode(Enum):
@@ -555,13 +570,42 @@ class DynamicPayloadEngine:
     Main dynamic payload generation engine.
     
     Generates thousands of unique payload combinations by:
-    1. Loading base payloads from all sources
+    1. Loading base payloads from all sources (including PayloadLibrary)
     2. Applying encoding variations
     3. Applying obfuscation techniques
     4. Applying WAF-specific bypasses
     5. Learning from responses
     6. Mutating successful payloads
     """
+    
+    # Category mapping from PayloadLibrary to internal types
+    CATEGORY_MAP = {
+        'SQL_INJECTION': 'sqli',
+        'NOSQL_INJECTION': 'nosqli',
+        'XSS': 'xss',
+        'SSRF': 'ssrf',
+        'SSTI': 'ssti',
+        'XXE': 'xxe',
+        'LFI': 'lfi',
+        'RCE': 'rce',
+        'JWT': 'jwt',
+        'CRLF': 'crlf',
+        'OPEN_REDIRECT': 'open_redirect',
+        'LDAP_INJECTION': 'ldap',
+        'XPATH_INJECTION': 'xpath',
+        'GRAPHQL': 'graphql',
+        'PROTOTYPE_POLLUTION': 'prototype_pollution',
+        'CORS': 'cors',
+        'CSRF': 'csrf',
+        'CSS_INJECTION': 'css_injection',
+        'CSV_INJECTION': 'csv_injection',
+        'SSI': 'ssi',
+        'LATEX_INJECTION': 'latex',
+        'XSLT_INJECTION': 'xslt',
+        'HTTP_PARAM_POLLUTION': 'hpp',
+        'WEBSOCKET': 'websocket',
+        'IDOR': 'idor',
+    }
     
     # Base payloads for each attack type
     BASE_PAYLOADS = {
@@ -704,6 +748,37 @@ class DynamicPayloadEngine:
         self.cache: dict[str, list[GeneratedPayload]] = {}
         self._successful_mutations: list[tuple[str, str]] = []
         self._blocked_patterns: set[str] = set()
+        self._extended_payloads: dict[str, list[str]] = {}
+        
+        # Load extended payloads from PayloadLibrary if available
+        if HAS_PAYLOAD_LIBRARY:
+            self._load_from_payload_library()
+    
+    def _load_from_payload_library(self):
+        """Load extended payloads from tools/payload_library.py."""
+        try:
+            library = PayloadLibrary()
+            
+            # Map PayloadLibrary categories to internal types
+            for cat in PayloadCategory:
+                internal_type = self.CATEGORY_MAP.get(cat.name, cat.name.lower())
+                payloads = library.get_by_category(cat)
+                
+                if payloads:
+                    if internal_type not in self._extended_payloads:
+                        self._extended_payloads[internal_type] = []
+                    
+                    for p in payloads:
+                        self._extended_payloads[internal_type].append(p.raw)
+            
+            total = sum(len(v) for v in self._extended_payloads.values())
+            logger.info(f"[PayloadLibrary] Loaded {total} extended payloads from {len(self._extended_payloads)} categories")
+        except Exception as e:
+            logger.warning(f"[PayloadLibrary] Failed to load: {e}")
+    
+    def get_extended_payloads(self, attack_type: str) -> list[str]:
+        """Get extended payloads for an attack type."""
+        return self._extended_payloads.get(attack_type.lower(), [])
     
     def set_context(self, **kwargs):
         """Update context dynamically."""
@@ -774,10 +849,25 @@ class DynamicPayloadEngine:
         yielded = 0
         seen_hashes = set()
         
-        # Get base payloads
-        base_payloads = self.BASE_PAYLOADS.get(attack_type.lower(), [])
+        # Get base payloads from internal BASE_PAYLOADS
+        base_payloads = list(self.BASE_PAYLOADS.get(attack_type.lower(), []))
+        
+        # Add extended payloads from PayloadLibrary (if available)
+        extended = self.get_extended_payloads(attack_type)
+        if extended:
+            # Add extended payloads that aren't duplicates
+            existing_set = set(base_payloads)
+            for p in extended:
+                if p not in existing_set:
+                    base_payloads.append(p)
+                    existing_set.add(p)
+        
+        # Add custom payloads
         if custom_payloads:
-            base_payloads = base_payloads + custom_payloads
+            existing_set = set(base_payloads)
+            for p in custom_payloads:
+                if p not in existing_set:
+                    base_payloads.append(p)
         
         # Limit base payloads based on mode
         base_payloads = base_payloads[:limits['base_limit']]

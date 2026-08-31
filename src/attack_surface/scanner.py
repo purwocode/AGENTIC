@@ -68,6 +68,47 @@ except ImportError:
     OOBServer = None
     BlindInjectionDetector = None
 
+# Nmap Arsenal for network reconnaissance
+try:
+    import sys
+    from pathlib import Path
+    tools_path = Path(__file__).parent.parent.parent / "tools"
+    if tools_path.exists():
+        sys.path.insert(0, str(tools_path))
+    from nmap_arsenal import NmapArsenal, ScanType, NSECategory
+    HAS_NMAP_ARSENAL = True
+except ImportError:
+    HAS_NMAP_ARSENAL = False
+    NmapArsenal = None
+    ScanType = None
+
+# Reverse shells for RCE exploitation
+try:
+    from reverse_shells import generate_payloads as generate_reverse_shells
+    HAS_REVERSE_SHELLS = True
+except ImportError:
+    HAS_REVERSE_SHELLS = False
+    generate_reverse_shells = None
+
+# ProjectDiscovery tools integration (nuclei, subfinder, httpx, etc.)
+try:
+    from attack_surface.pdtools import (
+        ProjectDiscoveryTools,
+        PDToolResult,
+        SubdomainResult,
+        PortResult,
+        HttpProbeResult,
+        CrawlResult,
+        NucleiResult,
+        CVEResult,
+        get_pd_tools,
+    )
+    HAS_PD_TOOLS = True
+except ImportError:
+    HAS_PD_TOOLS = False
+    ProjectDiscoveryTools = None
+    get_pd_tools = None
+
 
 @dataclass
 class HttpResponse:
@@ -1418,6 +1459,10 @@ class ActiveScanner:
         oob_port: int = 8888,
         oob_domain: str = None,
         oob_external_service: str = None,  # "interact.sh" or "burpcollaborator"
+        pd_tools_enabled: bool = True,  # Enable ProjectDiscovery tools
+        pd_rate_limit: int = 150,  # Rate limit for PD tools
+        pd_threads: int = 25,  # Thread count for PD tools
+        nuclei_templates_path: str = None,  # Custom nuclei templates path
     ):
         self.timeout = timeout
         self.verify_ssl = verify_ssl
@@ -1466,6 +1511,26 @@ class ActiveScanner:
             self.session.mount('https://', adapter)
         else:
             self.session = None
+        
+        # Initialize ProjectDiscovery Tools (nuclei, subfinder, httpx, etc.)
+        self._pd_tools_enabled = pd_tools_enabled and HAS_PD_TOOLS
+        self._pd_tools: ProjectDiscoveryTools | None = None
+        if self._pd_tools_enabled and HAS_PD_TOOLS:
+            self._pd_tools = ProjectDiscoveryTools(
+                timeout=timeout * 30,  # PD tools need more time
+                rate_limit=pd_rate_limit,
+                threads=pd_threads,
+                verbose=verbose,
+                nuclei_templates_path=nuclei_templates_path
+            )
+            available = self._pd_tools.get_available_tools()
+            enabled_tools = [k for k, v in available.items() if v]
+            if enabled_tools:
+                self._log(f"[PD Tools] Available: {', '.join(enabled_tools)}")
+            else:
+                self._log("[PD Tools] No ProjectDiscovery tools found in PATH")
+        elif pd_tools_enabled and not HAS_PD_TOOLS:
+            self._log("[PD Tools] Module not available (import failed)")
     
     def set_payload_mode(self, mode: str):
         """Change payload generation mode dynamically."""
@@ -1628,15 +1693,10 @@ class ActiveScanner:
                 import time
                 start_time = time.time()
                 
-                # Build test URL
-                test_url = endpoint.url
-                if endpoint.params:
-                    test_params = {k: payload if k == param else v for k, v in endpoint.params.items()}
-                    test_url = f"{endpoint.url}?{urllib.parse.urlencode(test_params)}"
-                else:
-                    test_url = f"{endpoint.url}?{param}={urllib.parse.quote(payload)}"
+                # Build test URL with payload in the specified parameter
+                test_url = f"{endpoint.url}?{param}={urllib.parse.quote(payload)}"
                 
-                response = self._make_request(test_url)
+                response = self._make_request("GET", test_url)
                 response_ms = (time.time() - start_time) * 1000
                 
                 # Verify based on type
@@ -1684,6 +1744,499 @@ class ActiveScanner:
         return results
     
     # ========== End OOB Methods ==========
+    
+    # ========== Network Reconnaissance (Nmap Arsenal) ==========
+    
+    def run_network_recon(
+        self, 
+        target: str,
+        scan_type: str = "comprehensive",
+        ports: str = None,
+        nse_categories: list[str] = None
+    ) -> dict:
+        """
+        Run network reconnaissance using Nmap Arsenal.
+        
+        Args:
+            target: IP address or hostname
+            scan_type: "quick", "comprehensive", "stealth", "vuln", "version"
+            ports: Port specification (e.g., "80,443,8080" or "1-1000")
+            nse_categories: NSE script categories to run
+        
+        Returns:
+            Dict with scan results including open ports, services, vulns
+        """
+        if not HAS_NMAP_ARSENAL:
+            self._log("[Nmap] Nmap Arsenal not available")
+            return {"error": "Nmap Arsenal not installed"}
+        
+        try:
+            arsenal = NmapArsenal()
+            
+            # Map scan type strings to enum
+            scan_type_map = {
+                "quick": ScanType.QUICK,
+                "comprehensive": ScanType.COMPREHENSIVE,
+                "stealth": ScanType.STEALTH,
+                "vuln": ScanType.VULN,
+                "version": ScanType.VERSION,
+                "full": ScanType.FULL,
+                "web": ScanType.WEB,
+            }
+            
+            scan_enum = scan_type_map.get(scan_type.lower(), ScanType.COMPREHENSIVE)
+            
+            # Build nmap command
+            cmd = arsenal.build_command(
+                target=target,
+                scan_type=scan_enum,
+                ports=ports,
+                nse_categories=nse_categories
+            )
+            
+            self._log(f"[Nmap] Running: {cmd}")
+            
+            # Execute scan (requires nmap installed)
+            import subprocess
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+            
+            # Parse results
+            return {
+                "command": cmd,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode,
+                "target": target,
+                "scan_type": scan_type
+            }
+            
+        except Exception as e:
+            self._log(f"[Nmap] Error: {e}")
+            return {"error": str(e)}
+    
+    def get_available_nse_scripts(self) -> list[str]:
+        """Get list of available NSE scripts from arsenal."""
+        if not HAS_NMAP_ARSENAL:
+            return []
+        try:
+            arsenal = NmapArsenal()
+            return arsenal.scripts
+        except:
+            return []
+    
+    # ========== ProjectDiscovery Tools Integration ==========
+    
+    def get_pd_tools_status(self) -> dict[str, bool]:
+        """Get status of available ProjectDiscovery tools."""
+        if not self._pd_tools:
+            return {"enabled": False, "tools": {}}
+        return {
+            "enabled": True,
+            "tools": self._pd_tools.get_available_tools()
+        }
+    
+    def pd_discover_subdomains(
+        self,
+        domain: str,
+        recursive: bool = False,
+        all_sources: bool = False
+    ) -> list:
+        """
+        Discover subdomains using subfinder.
+        
+        Args:
+            domain: Target domain
+            recursive: Use recursive-capable sources only
+            all_sources: Use all available sources (slower)
+            
+        Returns:
+            List of SubdomainResult objects
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("subfinder"):
+            self._log("[PD Tools] subfinder not available")
+            return []
+        
+        self._log(f"[PD Tools] Discovering subdomains for {domain}...")
+        results = self._pd_tools.discover_subdomains(
+            domain=domain,
+            recursive=recursive,
+            all_sources=all_sources
+        )
+        self._log(f"[PD Tools] Found {len(results)} subdomains")
+        return results
+    
+    def pd_scan_ports(
+        self,
+        targets: list[str],
+        ports: str = "top-100",
+        service_detection: bool = False
+    ) -> list:
+        """
+        Scan ports using naabu.
+        
+        Args:
+            targets: List of hosts/IPs
+            ports: Port specification (80,443 or top-100 or full)
+            service_detection: Identify services by port number
+            
+        Returns:
+            List of PortResult objects
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("naabu"):
+            self._log("[PD Tools] naabu not available")
+            return []
+        
+        self._log(f"[PD Tools] Scanning ports on {len(targets)} targets...")
+        results = self._pd_tools.scan_ports(
+            targets=targets,
+            ports=ports,
+            service_detection=service_detection
+        )
+        self._log(f"[PD Tools] Found {len(results)} open ports")
+        return results
+    
+    def pd_probe_http(
+        self,
+        targets: list[str],
+        tech_detect: bool = True,
+        follow_redirects: bool = True
+    ) -> list:
+        """
+        Probe HTTP services using httpx.
+        
+        Args:
+            targets: List of URLs/hosts
+            tech_detect: Enable technology detection
+            follow_redirects: Follow HTTP redirects
+            
+        Returns:
+            List of HttpProbeResult objects
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("httpx"):
+            self._log("[PD Tools] httpx not available")
+            return []
+        
+        self._log(f"[PD Tools] Probing HTTP services on {len(targets)} targets...")
+        results = self._pd_tools.probe_http(
+            targets=targets,
+            tech_detect=tech_detect,
+            follow_redirects=follow_redirects
+        )
+        self._log(f"[PD Tools] Found {len(results)} live HTTP services")
+        return results
+    
+    def pd_crawl(
+        self,
+        targets: list[str],
+        depth: int = 3,
+        js_crawl: bool = True,
+        headless: bool = False
+    ) -> list:
+        """
+        Crawl websites using katana.
+        
+        Args:
+            targets: List of URLs to crawl
+            depth: Maximum crawl depth
+            js_crawl: Parse JavaScript files
+            headless: Use headless browser
+            
+        Returns:
+            List of CrawlResult objects
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("katana"):
+            self._log("[PD Tools] katana not available")
+            return []
+        
+        self._log(f"[PD Tools] Crawling {len(targets)} targets...")
+        results = self._pd_tools.crawl(
+            targets=targets,
+            depth=depth,
+            js_crawl=js_crawl,
+            headless=headless
+        )
+        self._log(f"[PD Tools] Discovered {len(results)} URLs")
+        return results
+    
+    def pd_scan_vulnerabilities(
+        self,
+        targets: list[str],
+        template_tags: list[str] | None = None,
+        severity: list[str] | None = None,
+        automatic_scan: bool = False
+    ) -> list:
+        """
+        Scan for vulnerabilities using nuclei.
+        
+        Args:
+            targets: List of URLs to scan
+            template_tags: Filter templates by tags (e.g., cve, rce, sqli)
+            severity: Filter by severity (critical, high, medium, low, info)
+            automatic_scan: Use automatic web scan
+            
+        Returns:
+            List of NucleiResult objects
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("nuclei"):
+            self._log("[PD Tools] nuclei not available")
+            return []
+        
+        self._log(f"[PD Tools] Scanning {len(targets)} targets with nuclei...")
+        severity = severity or ["critical", "high", "medium"]
+        results = self._pd_tools.scan_vulnerabilities(
+            targets=targets,
+            template_tags=template_tags,
+            severity=severity,
+            automatic_scan=automatic_scan
+        )
+        self._log(f"[PD Tools] Found {len(results)} vulnerabilities")
+        return results
+    
+    def pd_scan_cves(
+        self,
+        targets: list[str],
+        cve_ids: list[str] | None = None,
+        year: int | None = None
+    ) -> list:
+        """
+        Scan for specific CVEs using nuclei.
+        
+        Args:
+            targets: List of URLs to scan
+            cve_ids: Specific CVE IDs to test
+            year: Test CVEs from specific year
+            
+        Returns:
+            List of NucleiResult objects
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("nuclei"):
+            self._log("[PD Tools] nuclei not available")
+            return []
+        
+        self._log(f"[PD Tools] Scanning for CVEs on {len(targets)} targets...")
+        results = self._pd_tools.scan_cves(
+            targets=targets,
+            cve_ids=cve_ids,
+            year=year
+        )
+        self._log(f"[PD Tools] Found {len(results)} CVE matches")
+        return results
+    
+    def pd_search_cves(
+        self,
+        query: str = "",
+        product: str | None = None,
+        severity: list[str] | None = None,
+        kev_only: bool = False,
+        has_poc: bool = False
+    ) -> list:
+        """
+        Search CVE database using vulnx.
+        
+        Args:
+            query: Search query
+            product: Filter by product name
+            severity: Filter by severity levels
+            kev_only: Only KEV (Known Exploited Vulnerabilities)
+            has_poc: Only CVEs with proof of concept
+            
+        Returns:
+            List of CVEResult objects
+        """
+        if not self._pd_tools or not self._pd_tools.is_tool_available("vulnx"):
+            self._log("[PD Tools] vulnx not available")
+            return []
+        
+        self._log(f"[PD Tools] Searching CVE database...")
+        results = self._pd_tools.search_cves(
+            query=query,
+            product=product,
+            severity=severity,
+            kev_only=kev_only,
+            has_poc=has_poc
+        )
+        self._log(f"[PD Tools] Found {len(results)} CVEs")
+        return results
+    
+    def pd_full_recon(
+        self,
+        domain: str,
+        include_ports: bool = True,
+        include_http_probe: bool = True,
+        include_crawl: bool = True
+    ) -> dict:
+        """
+        Perform full reconnaissance using ProjectDiscovery tools.
+        
+        Pipeline: subfinder → naabu → httpx → katana
+        
+        Args:
+            domain: Target domain
+            include_ports: Run port scan
+            include_http_probe: Run HTTP probing
+            include_crawl: Run web crawling
+            
+        Returns:
+            Dict with all reconnaissance data
+        """
+        if not self._pd_tools:
+            self._log("[PD Tools] Not available")
+            return {"error": "PD Tools not available"}
+        
+        self._log(f"[PD Tools] Starting full recon on {domain}...")
+        return self._pd_tools.full_recon(
+            domain=domain,
+            include_ports=include_ports,
+            include_http_probe=include_http_probe,
+            include_crawl=include_crawl
+        )
+    
+    def pd_vuln_scan_pipeline(
+        self,
+        targets: list[str],
+        severity: list[str] | None = None,
+        tags: list[str] | None = None,
+        crawl_first: bool = True
+    ) -> dict:
+        """
+        Full vulnerability scanning pipeline.
+        
+        Pipeline: httpx → katana → nuclei
+        
+        Args:
+            targets: Initial target URLs
+            severity: Minimum severity to report
+            tags: Template tags to use
+            crawl_first: Crawl before scanning
+            
+        Returns:
+            Dict with all vulnerability findings
+        """
+        if not self._pd_tools:
+            self._log("[PD Tools] Not available")
+            return {"error": "PD Tools not available"}
+        
+        self._log(f"[PD Tools] Starting vuln scan pipeline on {len(targets)} targets...")
+        return self._pd_tools.vuln_scan_pipeline(
+            targets=targets,
+            severity=severity,
+            tags=tags,
+            crawl_first=crawl_first
+        )
+    
+    # ========== Reverse Shell Generation ==========
+    
+    def generate_reverse_shell_payloads(
+        self, 
+        attacker_ip: str, 
+        attacker_port: int = 4444,
+        shell_types: list[str] = None
+    ) -> dict[str, str]:
+        """
+        Generate reverse shell payloads for RCE exploitation.
+        
+        Args:
+            attacker_ip: Attacker's IP address for callback
+            attacker_port: Port for reverse shell connection
+            shell_types: Specific shell types to generate (None = all)
+        
+        Returns:
+            Dict mapping shell type to payload string
+        """
+        if not HAS_REVERSE_SHELLS:
+            self._log("[RevShell] Reverse shell generator not available")
+            return {}
+        
+        try:
+            all_shells = generate_reverse_shells(attacker_ip, attacker_port)
+            
+            if shell_types:
+                return {k: v for k, v in all_shells.items() if k in shell_types}
+            return all_shells
+            
+        except Exception as e:
+            self._log(f"[RevShell] Error generating shells: {e}")
+            return {}
+    
+    def get_reverse_shell_for_target(
+        self,
+        tech_stack: TechStack,
+        attacker_ip: str,
+        attacker_port: int = 4444
+    ) -> dict[str, str]:
+        """
+        Get recommended reverse shells based on target tech stack.
+        
+        Args:
+            tech_stack: Detected TechStack object
+            attacker_ip: Attacker's IP address
+            attacker_port: Port for reverse shell
+        
+        Returns:
+            Dict of recommended shell types and payloads
+        """
+        if not HAS_REVERSE_SHELLS:
+            return {}
+        
+        all_shells = self.generate_reverse_shell_payloads(attacker_ip, attacker_port)
+        recommended = {}
+        
+        # Map tech stack to recommended shells
+        language = tech_stack.language.lower() if tech_stack.language else ""
+        framework = tech_stack.framework.lower() if tech_stack.framework else ""
+        server = tech_stack.server.lower() if tech_stack.server else ""
+        
+        # Python-based targets
+        if "python" in language or "flask" in framework or "django" in framework:
+            if "python" in all_shells:
+                recommended["python"] = all_shells["python"]
+            if "python_short" in all_shells:
+                recommended["python_short"] = all_shells["python_short"]
+        
+        # PHP-based targets  
+        if "php" in language or "laravel" in framework or "wordpress" in framework:
+            if "php" in all_shells:
+                recommended["php"] = all_shells["php"]
+            if "php_system" in all_shells:
+                recommended["php_system"] = all_shells["php_system"]
+        
+        # Node.js targets
+        if "node" in language or "express" in framework or "next" in framework:
+            if "nodejs" in all_shells:
+                recommended["nodejs"] = all_shells["nodejs"]
+        
+        # Ruby targets
+        if "ruby" in language or "rails" in framework:
+            if "ruby" in all_shells:
+                recommended["ruby"] = all_shells["ruby"]
+        
+        # Java targets (Groovy works in Java environments)
+        if "java" in language or "spring" in framework or "tomcat" in server:
+            if "groovy" in all_shells:
+                recommended["groovy"] = all_shells["groovy"]
+        
+        # Generic *nix shells (always include as fallback)
+        if "bash_tcp" in all_shells:
+            recommended["bash_tcp"] = all_shells["bash_tcp"]
+        if "nc_mkfifo" in all_shells:
+            recommended["nc_mkfifo"] = all_shells["nc_mkfifo"]
+        
+        # Windows targets
+        if "windows" in server or "iis" in server or "asp" in language:
+            if "powershell" in all_shells:
+                recommended["powershell"] = all_shells["powershell"]
+            if "powershell_base64" in all_shells:
+                recommended["powershell_base64"] = all_shells["powershell_base64"]
+        
+        return recommended if recommended else all_shells
+    
+    # ========== End Network Recon Methods ==========
     
     def _log(self, message: str):
         """Print verbose log."""
@@ -1984,7 +2537,13 @@ class ActiveScanner:
         data: Any = None,
         json_data: Any = None
     ) -> HttpResponse:
-        """Make HTTP request and capture response."""
+        """Make HTTP request and capture response.
+        
+        Auto-detects data type:
+        - dict in data → form-urlencoded
+        - json_data → JSON
+        - str/bytes in data → raw
+        """
         import time
         start = time.time()
         
@@ -1995,6 +2554,12 @@ class ActiveScanner:
         }
         if headers:
             default_headers.update(headers)
+        
+        # Auto-detect: if data is dict, convert to form-urlencoded
+        if isinstance(data, dict):
+            data = urllib.parse.urlencode(data)
+            if "Content-Type" not in default_headers:
+                default_headers["Content-Type"] = "application/x-www-form-urlencoded"
             
         try:
             if HAS_REQUESTS:
@@ -2384,8 +2949,8 @@ class ActiveScanner:
         elif test_type == "blind_sqli":
             if self._oob_enabled and self._blind_detector:
                 for endpoint in endpoints:
-                    if endpoint.params:
-                        for param in endpoint.params:
+                    if endpoint.parameters:
+                        for param in endpoint.parameters:
                             results.extend(self.test_blind_vulnerability(
                                 endpoint, param, "sqli"
                             ))
@@ -2393,8 +2958,8 @@ class ActiveScanner:
         elif test_type == "blind_rce":
             if self._oob_enabled and self._blind_detector:
                 for endpoint in endpoints:
-                    if endpoint.params:
-                        for param in endpoint.params:
+                    if endpoint.parameters:
+                        for param in endpoint.parameters:
                             results.extend(self.test_blind_vulnerability(
                                 endpoint, param, "rce"
                             ))
@@ -3372,38 +3937,36 @@ class ActiveScanner:
         for path in xml_paths:
             url = f"{base_url}{path}"
             for ipayload in interactive_payloads:
-                # Generate WAF bypass variations for XXE payload
-                payload_variations = self._get_waf_bypass_payloads(ipayload.payload, "xxe")
+                # XXE payloads shouldn't be URL-encoded, use original
+                test_payload = ipayload.payload
                 
-                for test_payload in payload_variations:
-                    resp = self._make_request("POST", url, 
-                        data=test_payload.encode(),
-                        headers={"Content-Type": "application/xml"}
-                    )
-                    
-                    # Use InteractiveValidator to validate response
-                    is_vuln, confidence, evidence = InteractiveValidator.validate_response(
-                        ipayload,
-                        resp.body,
-                        resp.elapsed_ms,
-                        resp.status_code
-                    )
-                    
-                    if is_vuln:
-                        bypass_note = " (bypass)" if test_payload != ipayload.payload else ""
-                        self._log(f"[!] CONFIRMED XXE{bypass_note}: {url}")
-                        results.append(VulnTestResult(
-                            vuln_type="XML External Entity (XXE)",
-                            payload=test_payload[:100] + "...",
-                            target_url=url,
-                            request_data=test_payload,
-                            response=resp,
-                            is_vulnerable=True,
-                            confidence=confidence,
-                            evidence=f"[CONFIRMED] {evidence}",
-                            evidence_hash=self._hash_evidence(f"XXE:{ipayload.canary}:{resp.status_code}")
-                        ))
-                        return results
+                resp = self._make_request("POST", url, 
+                    data=test_payload.encode(),
+                    headers={"Content-Type": "application/xml"}
+                )
+                
+                # Use InteractiveValidator to validate response
+                is_vuln, confidence, evidence = InteractiveValidator.validate_response(
+                    ipayload,
+                    resp.body,
+                    resp.elapsed_ms,
+                    resp.status_code
+                )
+                
+                if is_vuln:
+                    self._log(f"[!] CONFIRMED XXE: {url}")
+                    results.append(VulnTestResult(
+                        vuln_type="XML External Entity (XXE)",
+                        payload=test_payload[:100] + "...",
+                        target_url=url,
+                        request_data=test_payload,
+                        response=resp,
+                        is_vulnerable=True,
+                        confidence=confidence,
+                        evidence=f"[CONFIRMED] {evidence}",
+                        evidence_hash=self._hash_evidence(f"XXE:{ipayload.canary}:{resp.status_code}")
+                    ))
+                    return results
         
         return results
     
@@ -4146,7 +4709,8 @@ Content-Type: {content_type}\r
             # Check for user enumeration via login
             test_users = ["admin", "administrator", "root", "test"]
             for user in test_users:
-                resp = self._make_request("POST", login_url, form_data={
+                # Auto-detect: dict → form-urlencoded
+                resp = self._make_request("POST", login_url, data={
                     "log": user,
                     "pwd": "wrongpassword123",
                     "wp-submit": "Log In"
