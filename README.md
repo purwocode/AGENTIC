@@ -138,6 +138,85 @@ python -m attack_surface "Pentest https://target.com authorized" --payload-mode 
 python -m attack_surface --api --port 8080
 ```
 
+### 📖 CLI Reference (Referensi Command Line)
+
+```
+python -m attack_surface [REQUEST] [OPTIONS]
+```
+
+#### Arguments (Argumen)
+
+| Argument | Deskripsi | Contoh |
+|----------|-----------|--------|
+| `REQUEST` | Request keamanan dengan URL target | `"Zero-day research https://target.com dengan izin"` |
+
+#### Options (Opsi)
+
+| Option | Alias | Deskripsi | Default |
+|--------|-------|-----------|---------|
+| `--verbose` | `-v` | Tampilkan output detail (engine status, payload info) | `False` |
+| `--debate` | | Aktifkan sistem debate multi-agent | `False` |
+| `--payload-mode` | `-p` | Mode payload: `quick`, `standard`, `thorough`, `aggressive` | `standard` |
+| `--api` | | Jalankan sebagai REST API server | `False` |
+| `--port` | | Port untuk API server | `8080` |
+| `--no-save` | | Jangan simpan hasil ke disk | `False` |
+| `--output` | `-o` | Direktori output kustom | `attack-surface\Found` |
+
+#### Contoh Lengkap
+
+```bash
+# 1. Scan standar dengan izin
+python -m attack_surface "Zero-day research https://target.com dengan izin tertulis"
+
+# 2. Scan verbose + debate (recommended untuk detail)
+python -m attack_surface "Pentest https://target.com authorized" -v --debate
+
+# 3. Scan cepat untuk recon
+python -m attack_surface "Vulnerability scan https://api.target.com authorized" -p quick
+
+# 4. Scan agresif penuh dengan WAF bypass
+python -m attack_surface "Bug bounty https://target.com authorized" -v --debate -p aggressive
+
+# 5. Audit keamanan dengan output kustom
+python -m attack_surface "Security audit https://internal.com dengan izin" -o ./reports
+
+# 6. API server mode
+python -m attack_surface --api --port 9000
+```
+
+### 🏷️ Auto-Detect Request Type (Deteksi Otomatis Tipe Request)
+
+Sistem secara otomatis mendeteksi tipe request untuk label debate:
+
+| Kata Kunci dalam Request | Label yang Tampil |
+|-------------------------|-------------------|
+| `zero-day`, `0-day` | Riset Zero-Day / Zero-Day Research |
+| `bug bounty`, `bounty` | Perburuan Bug Bounty / Bug Bounty Hunt |
+| `pentest`, `penetration`, `uji penetrasi` | Uji Penetrasi / Penetration Test |
+| `exploit`, `eksploit` | Pengembangan Eksploit / Exploit Development |
+| `audit`, `security audit` | Audit Keamanan / Security Audit |
+| `vulnerability`, `kerentanan`, `celah` | Penilaian Kerentanan / Vulnerability Assessment |
+| `recon`, `reconnaissance` | Pengintaian / Reconnaissance |
+| `scan`, `scanning` | Pemindaian Keamanan / Security Scan |
+| Default (ID) | Perintah |
+| Default (EN) | Command |
+
+**Contoh Output:**
+```
+[*] Starting active scan on: https://target.com
+[*] Verbose mode: ENABLED
+[*] Payload mode: AGGRESSIVE
+[*] Phase 1: Reconnaissance...
+[*] Hypothesis Debate System: ENABLED
+
+======================================================================
+[*] DEBATE PHASE: AI Hypothesis Generation
+======================================================================
+[*] Debate Start : Riset Zero-Day    ← Auto-detected!
+    [Module GPT Hypothesis ]
+    [Module Claude Hypothesis ]
+```
+
 ### 🎛️ Payload Modes
 
 | Mode | Payload Count | Use Case |
@@ -338,10 +417,88 @@ python -m attack_surface "Pentest https://target.com authorized" --verbose --deb
 python -m attack_surface "Pentest https://target.com authorized" --payload-mode quick
 
 # Aggressive scan with WAF bypass (aggressive: ~5500 payloads)
-python -m attack_surface "Pentest https://target.com authorized" --payload-mode aggressive  --api --port 8080
+python -m attack_surface "Pentest https://target.com authorized" --payload-mode aggressive
 
 # With API server
 python -m attack_surface --api --port 8080
+```
+
+### 📖 CLI Reference
+
+```
+python -m attack_surface [REQUEST] [OPTIONS]
+```
+
+#### Arguments
+
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `REQUEST` | Security request with target URL | `"Zero-day research https://target.com authorized"` |
+
+#### Options
+
+| Option | Alias | Description | Default |
+|--------|-------|-------------|---------|
+| `--verbose` | `-v` | Show detailed output (engine status, payload info) | `False` |
+| `--debate` | | Enable multi-agent debate system | `False` |
+| `--payload-mode` | `-p` | Payload mode: `quick`, `standard`, `thorough`, `aggressive` | `standard` |
+| `--api` | | Run as REST API server | `False` |
+| `--port` | | Port for API server | `8080` |
+| `--no-save` | | Don't save results to disk | `False` |
+| `--output` | `-o` | Custom output directory | `attack-surface\Found` |
+
+#### Full Examples
+
+```bash
+# 1. Standard scan with authorization
+python -m attack_surface "Zero-day research https://target.com authorized"
+
+# 2. Verbose + debate (recommended for detailed analysis)
+python -m attack_surface "Pentest https://target.com authorized" -v --debate
+
+# 3. Quick scan for reconnaissance
+python -m attack_surface "Vulnerability scan https://api.target.com authorized" -p quick
+
+# 4. Full aggressive scan with WAF bypass
+python -m attack_surface "Bug bounty https://target.com authorized" -v --debate -p aggressive
+
+# 5. Security audit with custom output
+python -m attack_surface "Security audit https://internal.com authorized" -o ./reports
+
+# 6. API server mode
+python -m attack_surface --api --port 9000
+```
+
+### 🏷️ Auto-Detect Request Type
+
+The system automatically detects request type for debate labels:
+
+| Keywords in Request | Displayed Label |
+|--------------------|-----------------|
+| `zero-day`, `0-day` | Zero-Day Research |
+| `bug bounty`, `bounty` | Bug Bounty Hunt |
+| `pentest`, `penetration test` | Penetration Test |
+| `exploit` | Exploit Development |
+| `audit`, `security audit` | Security Audit |
+| `vulnerability`, `vuln` | Vulnerability Assessment |
+| `recon`, `reconnaissance` | Reconnaissance |
+| `scan`, `scanning` | Security Scan |
+| Default | Command |
+
+**Example Output:**
+```
+[*] Starting active scan on: https://target.com
+[*] Verbose mode: ENABLED
+[*] Payload mode: AGGRESSIVE
+[*] Phase 1: Reconnaissance...
+[*] Hypothesis Debate System: ENABLED
+
+======================================================================
+[*] DEBATE PHASE: AI Hypothesis Generation
+======================================================================
+[*] Debate Start : Zero-Day Research    ← Auto-detected!
+    [Module GPT Hypothesis ]
+    [Module Claude Hypothesis ]
 ```
 
 ### 🎛️ Payload Modes
@@ -489,6 +646,48 @@ Filter false positive menggunakan [MISP Warning Lists](https://github.com/MISP/m
 - 💬 **Support/Refute Mechanism** - Setiap agent memberikan evidence pro/kontra
 - 👿 **Devil's Advocate** - Agent khusus yang menantang setiap hipotesis
 - 📈 **Confidence Scoring** - Kalkulasi confidence berdasarkan debate outcome
+
+#### 🔄 Debate-First 3-Phase Flow (v1.2.0+)
+
+Ketika `--debate` diaktifkan, sistem menjalankan **debate SEBELUM scanning**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 1: DEBATE (AI Hypothesis Generation)                 │
+├─────────────────────────────────────────────────────────────┤
+│  [Module GPT Hypothesis]                                    │
+│    → GPT-4 proposes 3 initial vulnerability hypotheses      │
+│    → Based on target tech stack & common patterns           │
+│                                                             │
+│  [Module Claude Hypothesis]                                 │
+│    → Claude proposes 3 alternative hypotheses               │
+│    → Cross-validates GPT findings, adds new perspectives    │
+│                                                             │
+│  [Devil's Advocate]                                         │
+│    → Challenges all hypotheses for validity                 │
+│    → Filters weak assumptions before scanning               │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 2: VALIDATION (Active Scanning)                      │
+├─────────────────────────────────────────────────────────────┤
+│  Scanner validates debated hypotheses with actual payloads: │
+│  • Targeted test based on hypotheses                        │
+│  • Dynamic payload generation                               │
+│  • Response analysis & baseline comparison                  │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 3: CROSS-VALIDATION (Final Debate)                   │
+├─────────────────────────────────────────────────────────────┤
+│  Multi-agent debate on scan results:                        │
+│  • Hunter: Confirms exploitability                          │
+│  • Defender: Challenges assumptions                         │
+│  • Validator: Checks evidence quality                       │
+│  • Devil's Advocate: Final challenge                        │
+│  → Output: VERIFIED / NEEDS_MANUAL / FALSE_POSITIVE         │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ### NEW: WAF Detection & Bypass (v0.8.0)
 Integrasi [waf-checker](https://github.com/SecH0us3/waf-checker) untuk deteksi dan bypass WAF:
@@ -1666,6 +1865,48 @@ flowchart TD
 ---
 
 ## Hypothesis Debate System
+
+### 🔄 Debate-First 3-Phase Flow (v1.2.0+)
+
+When `--debate` is enabled, the system runs **debate BEFORE scanning**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 1: DEBATE (AI Hypothesis Generation)                 │
+├─────────────────────────────────────────────────────────────┤
+│  [Module GPT Hypothesis]                                    │
+│    → GPT-4 proposes 3 initial vulnerability hypotheses      │
+│    → Based on target tech stack & common patterns           │
+│                                                             │
+│  [Module Claude Hypothesis]                                 │
+│    → Claude proposes 3 alternative hypotheses               │
+│    → Cross-validates GPT findings, adds new perspectives    │
+│                                                             │
+│  [Devil's Advocate]                                         │
+│    → Challenges all hypotheses for validity                 │
+│    → Filters weak assumptions before scanning               │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 2: VALIDATION (Active Scanning)                      │
+├─────────────────────────────────────────────────────────────┤
+│  Scanner validates debated hypotheses with actual payloads: │
+│  • Targeted test based on hypotheses                        │
+│  • Dynamic payload generation                               │
+│  • Response analysis & baseline comparison                  │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│  PHASE 3: CROSS-VALIDATION (Final Debate)                   │
+├─────────────────────────────────────────────────────────────┤
+│  Multi-agent debate on scan results:                        │
+│  • Hunter: Confirms exploitability                          │
+│  • Defender: Challenges assumptions                         │
+│  • Validator: Checks evidence quality                       │
+│  • Devil's Advocate: Final challenge                        │
+│  → Output: VERIFIED / NEEDS_MANUAL / FALSE_POSITIVE         │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ### Debate Flow
 
