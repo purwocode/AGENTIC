@@ -155,17 +155,84 @@ class ProjectDiscoveryTools:
                 return str(path)
         return str(default_path)
     
+    def _get_pd_tool_path(self, tool_name: str) -> str | None:
+        """Get path to ProjectDiscovery tool, preferring pd-tools directory."""
+        # Check common PD tools installation directories first
+        home = Path.home()
+        pd_dirs = [
+            home / "pd-tools",
+            home / "go" / "bin",
+            home / ".local" / "bin",
+        ]
+        
+        # Add platform-specific directories
+        if os.name == "nt":
+            pd_dirs.append(Path("C:/pd-tools"))
+        else:
+            pd_dirs.append(Path("/usr/local/bin"))
+        
+        # Executable extension on Windows
+        exe_ext = ".exe" if os.name == "nt" else ""
+        tool_exe = f"{tool_name}{exe_ext}"
+        
+        # First check PD-specific directories
+        for pd_dir in pd_dirs:
+            try:
+                tool_path = pd_dir / tool_exe
+                if tool_path.exists():
+                    # Verify it's actually a PD tool (not Python httpx)
+                    if tool_name == "httpx":
+                        if self._is_pd_httpx(str(tool_path)):
+                            return str(tool_path)
+                    else:
+                        return str(tool_path)
+            except (OSError, PermissionError):
+                # Skip inaccessible directories
+                continue
+        
+        # Fall back to system PATH
+        system_path = shutil.which(tool_name)
+        if system_path:
+            # For httpx, verify it's PD version
+            if tool_name == "httpx":
+                if self._is_pd_httpx(system_path):
+                    return system_path
+            else:
+                return system_path
+        
+        return None
+    
+    def _is_pd_httpx(self, httpx_path: str) -> bool:
+        """Check if httpx is ProjectDiscovery version (not Python httpx)."""
+        try:
+            result = subprocess.run(
+                [httpx_path, "-version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # PD httpx shows "projectdiscovery.io" in version output
+            return "projectdiscovery" in result.stdout.lower() or "projectdiscovery" in result.stderr.lower()
+        except Exception:
+            return False
+    
     def _check_tools(self) -> dict[str, bool]:
-        """Check which tools are available."""
-        tools = {
-            "nuclei": shutil.which("nuclei") is not None,
-            "subfinder": shutil.which("subfinder") is not None,
-            "httpx": shutil.which("httpx") is not None,
-            "katana": shutil.which("katana") is not None,
-            "naabu": shutil.which("naabu") is not None,
-            "vulnx": shutil.which("vulnx") is not None,
-        }
+        """Check which ProjectDiscovery tools are available."""
+        # Store paths for later use
+        self._tool_paths = {}
+        
+        tools = {}
+        for tool_name in ["nuclei", "subfinder", "httpx", "katana", "naabu", "vulnx"]:
+            tool_path = self._get_pd_tool_path(tool_name)
+            tools[tool_name] = tool_path is not None
+            if tool_path:
+                self._tool_paths[tool_name] = tool_path
+        
         return tools
+    
+    def get_tool_path(self, tool_name: str) -> str | None:
+        """Get the verified path to a PD tool."""
+        return self._tool_paths.get(tool_name)
     
     def get_available_tools(self) -> dict[str, bool]:
         """Return dict of tool availability."""
@@ -261,7 +328,8 @@ class ProjectDiscoveryTools:
         if not self.is_tool_available("subfinder"):
             return []
         
-        cmd = ["subfinder", "-d", domain, "-json", "-silent"]
+        tool_path = self.get_tool_path("subfinder") or "subfinder"
+        cmd = [tool_path, "-d", domain, "-json", "-silent"]
         
         if sources:
             cmd.extend(["-s", ",".join(sources)])
@@ -323,7 +391,8 @@ class ProjectDiscoveryTools:
         if not self.is_tool_available("naabu"):
             return []
         
-        cmd = ["naabu", "-json", "-silent"]
+        tool_path = self.get_tool_path("naabu") or "naabu"
+        cmd = [tool_path, "-json", "-silent"]
         
         # Handle ports
         if ports == "top-100":
@@ -409,7 +478,8 @@ class ProjectDiscoveryTools:
         if not self.is_tool_available("httpx"):
             return []
         
-        cmd = ["httpx", "-json", "-silent"]
+        tool_path = self.get_tool_path("httpx") or "httpx"
+        cmd = [tool_path, "-json", "-silent"]
         
         if follow_redirects:
             cmd.append("-fr")
@@ -491,7 +561,8 @@ class ProjectDiscoveryTools:
         if not self.is_tool_available("katana"):
             return []
         
-        cmd = ["katana", "-jsonl", "-silent"]
+        tool_path = self.get_tool_path("katana") or "katana"
+        cmd = [tool_path, "-jsonl", "-silent"]
         
         cmd.extend(["-d", str(depth)])
         cmd.extend(["-fs", scope])
@@ -571,7 +642,8 @@ class ProjectDiscoveryTools:
         if not self.is_tool_available("nuclei"):
             return []
         
-        cmd = ["nuclei", "-jsonl", "-silent", "-nc"]  # nc = no-color
+        tool_path = self.get_tool_path("nuclei") or "nuclei"
+        cmd = [tool_path, "-jsonl", "-silent", "-nc"]  # nc = no-color
         
         if templates:
             for t in templates:
@@ -697,7 +769,8 @@ class ProjectDiscoveryTools:
         if not self.is_tool_available("vulnx"):
             return []
         
-        cmd = ["vulnx", "search", "--json", "--silent"]
+        tool_path = self.get_tool_path("vulnx") or "vulnx"
+        cmd = [tool_path, "search", "--json", "--silent"]
         
         if product:
             cmd.extend(["--product", product])
@@ -753,7 +826,8 @@ class ProjectDiscoveryTools:
         if not self.is_tool_available("vulnx"):
             return None
         
-        cmd = ["vulnx", "id", cve_id, "--json"]
+        tool_path = self.get_tool_path("vulnx") or "vulnx"
+        cmd = [tool_path, "id", cve_id, "--json"]
         result = self._run_command(cmd, "vulnx", timeout=timeout)
         
         if result.output:

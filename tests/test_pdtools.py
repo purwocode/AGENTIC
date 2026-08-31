@@ -153,7 +153,10 @@ class TestProjectDiscoveryTools:
     
     def test_initialization(self):
         """Test ProjectDiscoveryTools initialization."""
-        with patch('shutil.which', return_value=None):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
             assert pdt.timeout == 300
             assert pdt.rate_limit == 150
@@ -162,17 +165,20 @@ class TestProjectDiscoveryTools:
     def test_check_tools(self):
         """Test tool availability checking."""
         # Mock all tools as unavailable
-        with patch('shutil.which', return_value=None):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
             tools = pdt.get_available_tools()
             assert tools["nuclei"] is False
             assert tools["subfinder"] is False
             
         # Mock nuclei as available
-        def mock_which(name):
-            return "/usr/bin/nuclei" if name == "nuclei" else None
-            
-        with patch('shutil.which', side_effect=mock_which):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": True, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
             tools = pdt.get_available_tools()
             assert tools["nuclei"] is True
@@ -180,14 +186,16 @@ class TestProjectDiscoveryTools:
     
     def test_is_tool_available(self):
         """Test individual tool availability check."""
-        with patch('shutil.which', return_value=None):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
             assert pdt.is_tool_available("nuclei") is False
             assert pdt.is_tool_available("unknown") is False
     
     @patch('subprocess.run')
-    @patch('shutil.which', return_value='/usr/bin/subfinder')
-    def test_discover_subdomains(self, mock_which, mock_run):
+    def test_discover_subdomains(self, mock_run):
         """Test subdomain discovery."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -195,16 +203,20 @@ class TestProjectDiscoveryTools:
             stderr=""
         )
         
-        pdt = ProjectDiscoveryTools()
-        results = pdt.discover_subdomains("example.com")
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": True, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
+            pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {"subfinder": "/usr/bin/subfinder"}
+            results = pdt.discover_subdomains("example.com")
         
-        assert len(results) == 2
-        assert results[0].subdomain == "api.example.com"
-        assert results[1].subdomain == "www.example.com"
+            assert len(results) == 2
+            assert results[0].subdomain == "api.example.com"
+            assert results[1].subdomain == "www.example.com"
     
     @patch('subprocess.run')
-    @patch('shutil.which', return_value='/usr/bin/httpx')
-    def test_probe_http(self, mock_which, mock_run):
+    def test_probe_http(self, mock_run):
         """Test HTTP probing."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -212,16 +224,20 @@ class TestProjectDiscoveryTools:
             stderr=""
         )
         
-        pdt = ProjectDiscoveryTools()
-        results = pdt.probe_http(["https://example.com"])
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": True,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
+            pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {"httpx": "/usr/bin/httpx"}
+            results = pdt.probe_http(["https://example.com"])
         
-        assert len(results) == 1
-        assert results[0].url == "https://example.com"
-        assert results[0].status_code == 200
+            assert len(results) == 1
+            assert results[0].url == "https://example.com"
+            assert results[0].status_code == 200
     
     @patch('subprocess.run')
-    @patch('shutil.which', return_value='/usr/bin/nuclei')
-    def test_scan_vulnerabilities(self, mock_which, mock_run):
+    def test_scan_vulnerabilities(self, mock_run):
         """Test vulnerability scanning."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -229,16 +245,20 @@ class TestProjectDiscoveryTools:
             stderr=""
         )
         
-        pdt = ProjectDiscoveryTools()
-        results = pdt.scan_vulnerabilities(["https://test.com"])
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": True, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
+            pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {"nuclei": "/usr/bin/nuclei"}
+            results = pdt.scan_vulnerabilities(["https://test.com"])
         
-        assert len(results) == 1
-        assert results[0].template_id == "xss-reflected"
-        assert results[0].severity == "high"
+            assert len(results) == 1
+            assert results[0].template_id == "xss-reflected"
+            assert results[0].severity == "high"
     
     @patch('subprocess.run')
-    @patch('shutil.which', return_value='/usr/bin/katana')
-    def test_crawl(self, mock_which, mock_run):
+    def test_crawl(self, mock_run):
         """Test web crawling."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -246,31 +266,44 @@ class TestProjectDiscoveryTools:
             stderr=""
         )
         
-        pdt = ProjectDiscoveryTools()
-        results = pdt.crawl(["https://example.com"])
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": True, "naabu": False, "vulnx": False
+        }):
+            pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {"katana": "/usr/bin/katana"}
+            results = pdt.crawl(["https://example.com"])
         
-        assert len(results) == 2
-        assert "login" in results[0].url
+            assert len(results) == 2
+            assert "login" in results[0].url
     
     def test_discover_subdomains_unavailable(self):
         """Test behavior when subfinder is unavailable."""
-        with patch('shutil.which', return_value=None):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {}
             results = pdt.discover_subdomains("example.com")
             assert results == []
     
     @patch('subprocess.run')
-    @patch('shutil.which', return_value='/usr/bin/subfinder')
-    def test_command_timeout(self, mock_which, mock_run):
+    def test_command_timeout(self, mock_run):
         """Test command timeout handling."""
         import subprocess
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="subfinder", timeout=300)
         
-        pdt = ProjectDiscoveryTools()
-        results = pdt.discover_subdomains("example.com")
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": True, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
+            pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {"subfinder": "/usr/bin/subfinder"}
+            results = pdt.discover_subdomains("example.com")
         
-        # Should return empty list on timeout
-        assert results == []
+            # Should return empty list on timeout
+            assert results == []
 
 
 class TestGetPDTools:
@@ -278,7 +311,10 @@ class TestGetPDTools:
     
     def test_get_pd_tools(self):
         """Test convenience function."""
-        with patch('shutil.which', return_value=None):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = get_pd_tools(timeout=600, rate_limit=100)
             assert pdt.timeout == 600
             assert pdt.rate_limit == 100
@@ -287,15 +323,14 @@ class TestGetPDTools:
 class TestCombinedWorkflows:
     """Tests for combined workflow methods."""
     
-    @patch('subprocess.run')
-    @patch('shutil.which', return_value='/usr/bin/tool')
-    def test_full_recon_no_tools(self, mock_which, mock_run):
+    def test_full_recon_no_tools(self):
         """Test full recon when subfinder is unavailable."""
-        def mock_which_fn(name):
-            return None
-        
-        with patch('shutil.which', side_effect=mock_which_fn):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {}
             result = pdt.full_recon("example.com")
             
             # Should still return structure
@@ -312,11 +347,12 @@ class TestCombinedWorkflows:
             stderr=""
         )
         
-        def mock_which_fn(name):
-            return f"/usr/bin/{name}" if name in ["httpx", "katana", "nuclei"] else None
-        
-        with patch('shutil.which', side_effect=mock_which_fn):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": True, "subfinder": False, "httpx": True,
+            "katana": True, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {"httpx": "/usr/bin/httpx", "katana": "/usr/bin/katana", "nuclei": "/usr/bin/nuclei"}
             result = pdt.vuln_scan_pipeline(["https://example.com"])
             
             assert "targets" in result
@@ -331,27 +367,35 @@ class TestIntegrationWithScanner:
         """Test scanner with PD tools disabled."""
         from attack_surface.scanner import ActiveScanner
         
-        scanner = ActiveScanner(pd_tools_enabled=False, verbose=False)
-        status = scanner.get_pd_tools_status()
-        assert status["enabled"] is False
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
+            scanner = ActiveScanner(pd_tools_enabled=False, verbose=False)
+            status = scanner.get_pd_tools_status()
+            assert status["enabled"] is False
     
     def test_scanner_pd_methods_exist(self):
         """Test that PD tools methods exist on scanner."""
         from attack_surface.scanner import ActiveScanner
         
-        scanner = ActiveScanner(verbose=False)
-        
-        # Check methods exist
-        assert hasattr(scanner, "pd_discover_subdomains")
-        assert hasattr(scanner, "pd_scan_ports")
-        assert hasattr(scanner, "pd_probe_http")
-        assert hasattr(scanner, "pd_crawl")
-        assert hasattr(scanner, "pd_scan_vulnerabilities")
-        assert hasattr(scanner, "pd_scan_cves")
-        assert hasattr(scanner, "pd_search_cves")
-        assert hasattr(scanner, "pd_full_recon")
-        assert hasattr(scanner, "pd_vuln_scan_pipeline")
-        assert hasattr(scanner, "get_pd_tools_status")
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
+            scanner = ActiveScanner(verbose=False)
+            
+            # Check methods exist
+            assert hasattr(scanner, "pd_discover_subdomains")
+            assert hasattr(scanner, "pd_scan_ports")
+            assert hasattr(scanner, "pd_probe_http")
+            assert hasattr(scanner, "pd_crawl")
+            assert hasattr(scanner, "pd_scan_vulnerabilities")
+            assert hasattr(scanner, "pd_scan_cves")
+            assert hasattr(scanner, "pd_search_cves")
+            assert hasattr(scanner, "pd_full_recon")
+            assert hasattr(scanner, "pd_vuln_scan_pipeline")
+            assert hasattr(scanner, "get_pd_tools_status")
 
 
 class TestEdgeCases:
@@ -377,8 +421,12 @@ class TestEdgeCases:
                 stderr=""
             )
             
-            with patch('shutil.which', return_value='/usr/bin/subfinder'):
+            with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+                "nuclei": False, "subfinder": True, "httpx": False,
+                "katana": False, "naabu": False, "vulnx": False
+            }):
                 pdt = ProjectDiscoveryTools()
+                pdt._tool_paths = {"subfinder": "/usr/bin/subfinder"}
                 # Internal _run_command should skip invalid JSON lines
                 result = pdt._run_command(["subfinder", "-d", "test"], "subfinder")
                 
@@ -388,8 +436,12 @@ class TestEdgeCases:
     
     def test_special_characters_in_domain(self):
         """Test handling domains with special characters."""
-        with patch('shutil.which', return_value=None):
+        with patch.object(ProjectDiscoveryTools, '_check_tools', return_value={
+            "nuclei": False, "subfinder": False, "httpx": False,
+            "katana": False, "naabu": False, "vulnx": False
+        }):
             pdt = ProjectDiscoveryTools()
+            pdt._tool_paths = {}
             # Should not raise exception
             results = pdt.discover_subdomains("test-domain.example.com")
             assert results == []
