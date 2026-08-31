@@ -18,13 +18,41 @@ note.txt
 notes/
 TODO.txt
 
-# Environment & credentials
+# Environment & credentials - NEVER COMMIT!
 .env
 .env.*
 *.env
+.env.local
+.env.*.local
 secrets.json
 credentials.json
 config.local.py
+config.local.json
+
+# API Keys & Secrets - NEVER COMMIT!
+**/api_keys.py
+**/secrets.py
+**/keys.py
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+*.gpg
+
+# OAuth tokens
+token.json
+tokens.json
+oauth*.json
+*_token.json
+
+# Cloud credentials
+.aws/
+.azure/
+.gcp/
+gcloud*.json
+service-account*.json
 
 # Logs
 *.log
