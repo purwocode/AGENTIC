@@ -128,7 +128,10 @@ class ZeroDayOrchestrator:
             print(f"\n{'='*70}")
             print("[*] DEBATE PHASE: AI Hypothesis Generation")
             print(f"{'='*70}")
-            print("[*] Debate Start : Perintah")
+            
+            # Auto-detect request type for debate label
+            debate_type = self._detect_request_type(user_request)
+            print(f"[*] Debate Start : {debate_type}")
             print("    [Module GPT Hypothesis ]")
             print("    [Module Claude Hypothesis ]")
             print()
@@ -200,6 +203,55 @@ class ZeroDayOrchestrator:
         status = "exploit_validated" if confirmed else "analysis_complete"
         
         return ZeroDayReport(status, target_url, tuple(context), tuple(findings), final, attack_phase.prompt())
+    
+    def _detect_request_type(self, user_request: str) -> str:
+        """
+        Auto-detect the type of security research request.
+        
+        Returns a label describing the request type (in user's language).
+        """
+        request_lower = user_request.lower()
+        
+        # Indonesian keywords
+        id_keywords = {
+            "izin": True, "dengan": True, "tertulis": True, "penelitian": True,
+            "riset": True, "keamanan": True, "uji": True, "penetrasi": True,
+            "mencari": True, "celah": True, "kerentanan": True, "pada": True,
+        }
+        
+        # Detect language (Indonesian vs English)
+        is_indonesian = sum(1 for kw in id_keywords if kw in request_lower) >= 2
+        
+        # Detect request type (ordered from most specific to least specific)
+        if any(x in request_lower for x in ["zero-day", "zero day", "0-day", "0day"]):
+            return "Zero-Day Research" if not is_indonesian else "Riset Zero-Day"
+        
+        if any(x in request_lower for x in ["bug bounty", "bugbounty", "bounty"]):
+            return "Bug Bounty Hunt" if not is_indonesian else "Perburuan Bug Bounty"
+        
+        if any(x in request_lower for x in ["pentest", "penetration test", "penetrasi", "uji penetrasi"]):
+            return "Penetration Test" if not is_indonesian else "Uji Penetrasi"
+        
+        if any(x in request_lower for x in ["exploit", "eksploit"]):
+            return "Exploit Development" if not is_indonesian else "Pengembangan Eksploit"
+        
+        if any(x in request_lower for x in ["audit", "security audit", "audit keamanan"]):
+            return "Security Audit" if not is_indonesian else "Audit Keamanan"
+        
+        if any(x in request_lower for x in ["vulnerability", "vuln", "kerentanan", "celah"]):
+            return "Vulnerability Assessment" if not is_indonesian else "Penilaian Kerentanan"
+        
+        if any(x in request_lower for x in ["recon", "reconnaissance", "mapping", "discovery", "pengintaian"]):
+            return "Reconnaissance" if not is_indonesian else "Pengintaian"
+        
+        if any(x in request_lower for x in ["attack", "serangan", "hack", "hacking"]):
+            return "Attack Simulation" if not is_indonesian else "Simulasi Serangan"
+        
+        if any(x in request_lower for x in ["scan", "scanning", "pindai"]):
+            return "Security Scan" if not is_indonesian else "Pemindaian Keamanan"
+        
+        # Default based on language
+        return "Perintah" if is_indonesian else "Command"
     
     def _generate_initial_hypotheses(self, target_url: str, user_request: str) -> list[dict]:
         """
