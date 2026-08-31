@@ -15,7 +15,8 @@ from .orchestrator import ZeroDayOrchestrator, ZeroDayReport
 from .models import ZeroDayFinding, ExploitPayload, ProofOfConcept
 
 
-FINDINGS_DIR = Path(r"attack-surface\Found")
+# Default output directory (relative to current working directory)
+FINDINGS_DIR = Path.cwd() / "Found"
 
 
 def save_findings(report: ZeroDayReport) -> Path:

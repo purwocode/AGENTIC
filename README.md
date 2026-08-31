@@ -160,7 +160,7 @@ python -m attack_surface [REQUEST] [OPTIONS]
 | `--api` | | Jalankan sebagai REST API server | `False` |
 | `--port` | | Port untuk API server | `8080` |
 | `--no-save` | | Jangan simpan hasil ke disk | `False` |
-| `--output` | `-o` | Direktori output kustom | `attack-surface\Found` |
+| `--output` | `-o` | Direktori output kustom | `./Found` |
 
 #### Contoh Lengkap
 
@@ -445,7 +445,7 @@ python -m attack_surface [REQUEST] [OPTIONS]
 | `--api` | | Run as REST API server | `False` |
 | `--port` | | Port for API server | `8080` |
 | `--no-save` | | Don't save results to disk | `False` |
-| `--output` | `-o` | Custom output directory | `attack-surface\Found` |
+| `--output` | `-o` | Custom output directory | `./Found` |
 
 #### Full Examples
 
@@ -970,7 +970,7 @@ flowchart LR
 ## Project Structure
 
 ```
-attack-surface\
+attack-surface/
 │
 ├── 📄 pyproject.toml          # Project configuration & dependencies
 ├── 📄 README.md               # This documentation

@@ -160,7 +160,7 @@ Request tanpa otorisasi akan **ditolak**.
 ### File Structure dengan Penjelasan
 
 ```
-attack-surface\
+attack-surface/
 │
 ├── pyproject.toml              # Konfigurasi project (dependencies, metadata)
 │   └── Berisi: name, version, dependencies, entry points
