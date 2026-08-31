@@ -697,12 +697,42 @@ class InteractiveValidator:
         
         elif payload.validation_type == "auth_bypass":
             # Check for successful authentication indicators
+            # IMPORTANT: Must be actual JSON data, not HTML form labels
+            
+            # First, reject if this looks like a login HTML page
+            is_html_page = "<html" in body_lower or "<!doctype" in body_lower
+            has_form = "<form" in body_lower or 'type="password"' in body_lower
+            if is_html_page and has_form:
+                return False, 0.1, f"Response is HTML login page, not auth bypass"
+            
             if response_status == 200:
-                auth_indicators = ["token", "jwt", "session", "access_token", "refresh_token", 
-                                   "user_id", "username", "email", "role", "admin"]
-                for indicator in auth_indicators:
+                # Strong indicators - JSON structure with actual tokens
+                strong_indicators = [
+                    '"token":', '"jwt":', '"access_token":', '"refresh_token":',
+                    '"session":', '"sessionid":', '"auth_token":'
+                ]
+                for indicator in strong_indicators:
                     if indicator in body_lower:
-                        return True, 0.90, f"Auth bypass: '{indicator}' in 200 response"
+                        return True, 0.95, f"Auth bypass: {indicator} found in JSON response"
+                
+                # Medium indicators - user data in JSON format (not form labels)
+                medium_indicators = [
+                    '"user_id":', '"userid":', '"email":', '"role":', 
+                    '"admin":true', '"authenticated":true', '"logged_in":true'
+                ]
+                for indicator in medium_indicators:
+                    if indicator in body_lower:
+                        # Additional check: must NOT be HTML
+                        if not is_html_page:
+                            return True, 0.85, f"Auth bypass: {indicator} found in response"
+                
+                # Weak indicators - only if response is JSON (not HTML)
+                if not is_html_page and (body_lower.strip().startswith("{") or body_lower.strip().startswith("[")):
+                    weak_indicators = ["user", "account", "profile", "data"]
+                    for indicator in weak_indicators:
+                        if f'"{indicator}"' in body_lower:
+                            return True, 0.70, f"Possible auth bypass: {indicator} in JSON response"
+            
             return False, 0.1, f"No auth bypass indicators. Status: {response_status}"
         
         return False, 0.0, "Unknown validation type"
@@ -2482,14 +2512,30 @@ class ActiveScanner:
         """Compare response with baseline to detect significant differences."""
         body_lower = resp.body.lower()
         
+        # Check if response is HTML page (form/login page)
+        is_html_response = "<html" in body_lower or "<!doctype" in body_lower
+        has_form = "<form" in body_lower or 'type="password"' in body_lower
+        is_json_response = resp.body.strip().startswith("{") or resp.body.strip().startswith("[")
+        
+        # Token detection - must be in JSON format, not HTML label
+        token_patterns_json = ['"token":', '"jwt":', '"access_token":', '"session":']
+        new_token = not baseline.has_token and any(tok in body_lower for tok in token_patterns_json) and is_json_response
+        
+        # User data detection - must be actual JSON data, not form labels
+        user_data_patterns_json = ['"user":{', '"email":', '"user_id":', '"_id":', '"role":']
+        new_user_data = (not baseline.has_user_data and 
+                        any(tok in body_lower for tok in user_data_patterns_json) and 
+                        is_json_response and not is_html_response)
+        
         comparison = {
             "status_changed": resp.status_code != baseline.status_code,
             "length_diff": abs(len(resp.body) - baseline.body_length),
             "length_diff_percent": (abs(len(resp.body) - baseline.body_length) / max(baseline.body_length, 1)) * 100,
             "body_hash_changed": hashlib.md5(resp.body.encode()).hexdigest() != baseline.body_hash,
-            "new_token_appeared": not baseline.has_token and any(tok in body_lower for tok in ["token", "jwt", "access_token"]),
-            "new_user_data": not baseline.has_user_data and any(tok in body_lower for tok in ['"user":', '"email":', '"id":']),
-            "bypassed_login_page": baseline.is_login_page and "<!doctype" not in body_lower.replace(" ", ""),
+            "new_token_appeared": new_token,
+            "new_user_data": new_user_data,
+            "bypassed_login_page": baseline.is_login_page and is_json_response and not is_html_response,
+            "is_still_login_page": is_html_response and has_form,  # Track if still showing login page
         }
         
         # Calculate significance score
@@ -2502,11 +2548,15 @@ class ActiveScanner:
             score += 30
         if comparison["bypassed_login_page"]:
             score += 25
-        if comparison["length_diff_percent"] > 50:
+        if comparison["length_diff_percent"] > 50 and not comparison["is_still_login_page"]:
             score += 15
         
-        comparison["significance_score"] = score
-        comparison["is_significant"] = score >= 30
+        # Penalty for still being on login page
+        if comparison["is_still_login_page"]:
+            score -= 50
+        
+        comparison["significance_score"] = max(0, score)
+        comparison["is_significant"] = score >= 30 and not comparison["is_still_login_page"]
         
         return comparison
     

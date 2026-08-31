@@ -234,21 +234,39 @@ class ZeroDayOrchestrator:
             # Response content analysis
             body_lower = v.response.body.lower() if v.response.body else ""
             
-            # Check for positive indicators
+            # Check for positive indicators (strong evidence of successful exploit)
+            # These must be actual returned data, not form field labels
             positive_indicators = {
-                "token": ["token", "jwt", "access_token", "bearer"],
-                "user_data": ['"user":', '"email":', '"id":', '"role":'],
-                "success": ["success", "authenticated", "welcome"],
-                "sql_error": ["sql", "mysql", "sqlite", "syntax error"],
-                "sensitive_data": ["password", "secret", "api_key", "credentials"],
+                "token": ["\"token\":", "\"jwt\":", "\"access_token\":", "\"bearer\":", "\"session\":"],
+                "user_data": ["\"user\":{", "\"email\":", "\"user_id\":", "\"role\":\"admin", "\"authenticated\":true"],
+                "success": ["\"success\":true", "\"status\":\"ok\"", "\"authenticated\":true", "\"logged_in\":true"],
+                "sql_error": ["sql syntax", "mysql error", "sqlite error", "ora-", "pg::", "sqlstate"],
+                "sensitive_data": ["\"password\":", "\"secret\":", "\"api_key\":", "\"credentials\":"],
+                "data_dump": ["\"data\":[", "\"results\":[", "\"items\":[", "\"records\":["],
             }
             
-            # Check for false positive indicators  
+            # Check for false positive indicators (signs this is NOT a real vulnerability)
             fp_indicators = {
-                "login_page": ["<title>log in", "login form", "wp-login", "sign in", "password field"],
-                "error_page": ["error", "invalid", "unauthorized", "forbidden", "access denied"],
-                "generic_page": ["<!doctype html", "<html", "<head>", "homepage"],
+                "login_page": [
+                    "<form", "type=\"password\"", "name=\"password\"", "name=\"username\"",
+                    "<input", "type=\"submit\"", "sign in", "log in", "login form",
+                    "forgot password", "reset password", "remember me"
+                ],
+                "html_page": [
+                    "<!doctype html", "<html lang=", "<head>", "<title>", "</html>",
+                    "<meta charset", "<link rel=", "<script src="
+                ],
+                "error_page": [
+                    "invalid credentials", "login failed", "unauthorized", "403 forbidden",
+                    "access denied", "authentication required", "please log in"
+                ],
+                "generic_response": [
+                    "welcome to", "homepage", "index page", "main page"
+                ],
             }
+            
+            # Determine if this is an auth bypass type vulnerability
+            is_auth_bypass = any(x in v.vuln_type.lower() for x in ["auth bypass", "nosql injection", "sql injection", "authentication"])
             
             found_positive = None
             for indicator_type, patterns in positive_indicators.items():
@@ -257,10 +275,45 @@ class ZeroDayOrchestrator:
                     break
             
             found_fp = None
+            fp_confidence = 0.5
             for fp_type, patterns in fp_indicators.items():
-                if any(p in body_lower for p in patterns):
-                    found_fp = fp_type
-                    break
+                matches = sum(1 for p in patterns if p in body_lower)
+                if matches > 0:
+                    # More matches = higher FP confidence
+                    if matches >= 3:
+                        found_fp = fp_type
+                        fp_confidence = 0.85
+                        break
+                    elif matches >= 2:
+                        found_fp = fp_type
+                        fp_confidence = 0.75
+                    elif not found_fp:
+                        found_fp = fp_type
+                        fp_confidence = 0.6
+            
+            # Special check for auth bypass false positives
+            if is_auth_bypass:
+                # If response is HTML (not JSON/API), it's likely a false positive
+                is_html_response = "<html" in body_lower or "<!doctype" in body_lower
+                is_json_response = body_lower.strip().startswith("{") or body_lower.strip().startswith("[")
+                
+                if is_html_response and not is_json_response:
+                    # Auth bypass should return JSON data, not HTML pages
+                    if not found_fp:
+                        found_fp = "html_page"
+                    fp_confidence = max(fp_confidence, 0.8)
+                    
+                # If we see form elements, definitely a login page
+                has_form_elements = any(x in body_lower for x in ['<form', 'type="password"', 'type="submit"'])
+                if has_form_elements:
+                    found_fp = "login_page"
+                    fp_confidence = 0.9
+                    
+                # For NoSQL injection specifically, check if we actually got user data
+                if "nosql" in v.vuln_type.lower():
+                    has_real_user_data = any(x in body_lower for x in ['"user":{', '"_id":', '"email":', '"role":'])
+                    if not has_real_user_data and found_fp:
+                        fp_confidence = 0.95  # Very high confidence it's FP
             
             # Add evidence based on content analysis
             if found_positive:
@@ -283,12 +336,33 @@ class ZeroDayOrchestrator:
                     AgentRole.DEVIL_ADVOCATE,
                     Evidence(
                         type="false_positive_check",
-                        data={"indicator_type": found_fp, "is_generic_response": True},
+                        data={
+                            "indicator_type": found_fp, 
+                            "is_generic_response": True,
+                            "is_auth_bypass": is_auth_bypass,
+                            "has_form_elements": 'form' in body_lower
+                        },
                         supports_hypothesis=False,
-                        confidence=0.75 if found_fp == "login_page" else 0.5,
+                        confidence=fp_confidence,
                         source_agent=AgentRole.DEVIL_ADVOCATE
                     ),
-                    f"Response appears to be {found_fp.replace('_', ' ')} - likely FALSE POSITIVE"
+                    f"Response is {found_fp.replace('_', ' ')} (confidence: {fp_confidence:.0%}) - FALSE POSITIVE"
+                )
+            
+            # Additional auth bypass validation
+            if is_auth_bypass and not found_positive:
+                # If it's supposed to be auth bypass but we found no token/user data, flag it
+                self._debate.refute_hypothesis(
+                    hyp.id,
+                    AgentRole.DEVIL_ADVOCATE,
+                    Evidence(
+                        type="missing_evidence",
+                        data={"expected": "token or user data", "actual": "none found"},
+                        supports_hypothesis=False,
+                        confidence=0.85,
+                        source_agent=AgentRole.DEVIL_ADVOCATE
+                    ),
+                    "Auth bypass claimed but no token/user data returned - FALSE POSITIVE"
                 )
             
             # Check for confirmed status
